@@ -1,6 +1,6 @@
 {application, erlmcp,
  [{description, "Erlang Model Context Protocol (MCP) SDK"},
-  {vsn, "0.2.3"},
+  {vsn, "0.2.4"},
   {registered, [
       erlmcp_sup,
       erlmcp_client_sup,
@@ -43,7 +43,7 @@
   {links, [{"GitHub", "https://github.com/banyan-platform/erlmcp"}]},
   {build_tools, ["rebar3"]},
   {files, ["src", "include", "priv", "rebar.config", "README.md", "LICENSE"]},
-  
+
   %% OTP application upgrade instructions
   {runtime_dependencies, [
       "kernel-6.0",
@@ -51,7 +51,7 @@
       "ssl-9.0",
       "inets-7.0"
   ]},
-  
+
   %% Additional metadata
   {maintainers, ["Your Name"]},
   {exclude_files, ["test/*.erl", "logs/*"]},
