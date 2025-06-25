@@ -3,6 +3,7 @@
 
 -include("erlmcp.hrl").
 
+%% API exports
 -export([
     start_link/1, start_link/2,
     initialize/2, initialize/3,
@@ -18,333 +19,281 @@
     stop/1
 ]).
 
+%% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
+%% Types
+-type client() :: pid().
+-type transport_opts() :: {stdio, list()} | {tcp, map()} | {http, map()}.
+-type client_opts() :: #{
+    strict_mode => boolean(),
+    timeout => timeout(),
+    _ => _
+}.
+-type request_id() :: pos_integer().
+-type batch_id() :: reference().
+-type notification_handler() :: fun((binary(), map()) -> any()) | {module(), atom()}.
+-type sampling_handler() :: fun((binary(), map()) -> any()) | {module(), atom()} | pid().
+
+-export_type([client/0, transport_opts/0, client_opts/0]).
+
+%% State record with better type specifications
 -record(state, {
     transport :: module(),
     transport_state :: term(),
-    capabilities :: #mcp_server_capabilities{},
-    request_id = 1 :: integer(),
-    pending_requests = #{} :: map(),
-    batch_requests = #{} :: map(),
-    notification_handlers = #{} :: map(),
-    sampling_handler :: pid() | undefined,
+    capabilities :: #mcp_server_capabilities{} | undefined,
+    request_id = 1 :: request_id(),
+    pending_requests = #{} :: #{request_id() => {atom(), pid()}},
+    batch_requests = #{} :: #{batch_id() => [{request_id(), binary(), map()}]},
+    notification_handlers = #{} :: #{binary() => notification_handler()},
+    sampling_handler :: sampling_handler() | undefined,
     strict_mode = false :: boolean(),
-    subscriptions = #{} :: map(),
-    initialized = false :: boolean()
+    subscriptions = sets:set() :: sets:set(binary()),
+    initialized = false :: boolean(),
+    timeout = 5000 :: timeout()
 }).
 
-start_link(TransportOpts) ->
-    gen_server:start_link(?MODULE, [TransportOpts, #{}], []).
+-type state() :: #state{}.
 
+%% Macros for common patterns
+-define(CALL_TIMEOUT(State), State#state.timeout).
+-define(IS_INITIALIZED(State), State#state.initialized).
+-define(CHECK_CAPABILITY(State, Cap), 
+    case validate_capability(State, Cap) of
+        ok -> do_request;
+        {error, _} = Error -> Error
+    end).
+
+%%====================================================================
+%% API Functions
+%%====================================================================
+
+-spec start_link(transport_opts()) -> {ok, client()} | {error, term()}.
+start_link(TransportOpts) ->
+    start_link(TransportOpts, #{}).
+
+-spec start_link(transport_opts(), client_opts()) -> {ok, client()} | {error, term()}.
 start_link(TransportOpts, Options) ->
     gen_server:start_link(?MODULE, [TransportOpts, Options], []).
 
+-spec initialize(client(), #mcp_client_capabilities{}) -> 
+    {ok, map()} | {error, term()}.
 initialize(Client, Capabilities) ->
-    gen_server:call(Client, {initialize, Capabilities, #{}}).
+    initialize(Client, Capabilities, #{}).
 
+-spec initialize(client(), #mcp_client_capabilities{}, map()) -> 
+    {ok, map()} | {error, term()}.
 initialize(Client, Capabilities, Options) ->
-    gen_server:call(Client, {initialize, Capabilities, Options}).
+    gen_server:call(Client, {initialize, Capabilities, Options}, infinity).
 
+-spec list_roots(client()) -> {ok, [map()]} | {error, term()}.
 list_roots(Client) ->
     gen_server:call(Client, list_roots).
 
+-spec list_resources(client()) -> {ok, [map()]} | {error, term()}.
 list_resources(Client) ->
     gen_server:call(Client, list_resources).
 
-read_resource(Client, Uri) ->
+-spec read_resource(client(), binary()) -> {ok, map()} | {error, term()}.
+read_resource(Client, Uri) when is_binary(Uri) ->
     gen_server:call(Client, {read_resource, Uri}).
 
+-spec list_prompts(client()) -> {ok, [map()]} | {error, term()}.
 list_prompts(Client) ->
     gen_server:call(Client, list_prompts).
 
-get_prompt(Client, Name) ->
-    gen_server:call(Client, {get_prompt, Name, #{}}).
+-spec get_prompt(client(), binary()) -> {ok, map()} | {error, term()}.
+get_prompt(Client, Name) when is_binary(Name) ->
+    get_prompt(Client, Name, #{}).
 
-get_prompt(Client, Name, Arguments) ->
+-spec get_prompt(client(), binary(), map()) -> {ok, map()} | {error, term()}.
+get_prompt(Client, Name, Arguments) when is_binary(Name), is_map(Arguments) ->
     gen_server:call(Client, {get_prompt, Name, Arguments}).
 
+-spec list_tools(client()) -> {ok, [map()]} | {error, term()}.
 list_tools(Client) ->
     gen_server:call(Client, list_tools).
 
-call_tool(Client, Name, Arguments) ->
+-spec call_tool(client(), binary(), map()) -> {ok, map()} | {error, term()}.
+call_tool(Client, Name, Arguments) when is_binary(Name), is_map(Arguments) ->
     gen_server:call(Client, {call_tool, Name, Arguments}).
 
+-spec stop(client()) -> ok.
 stop(Client) ->
     gen_server:stop(Client).
 
+-spec list_resource_templates(client()) -> {ok, [map()]} | {error, term()}.
 list_resource_templates(Client) ->
     gen_server:call(Client, list_resource_templates).
 
-subscribe_to_resource(Client, Uri) ->
+-spec subscribe_to_resource(client(), binary()) -> ok | {error, term()}.
+subscribe_to_resource(Client, Uri) when is_binary(Uri) ->
     gen_server:call(Client, {subscribe_resource, Uri}).
 
-unsubscribe_from_resource(Client, Uri) ->
+-spec unsubscribe_from_resource(client(), binary()) -> ok | {error, term()}.
+unsubscribe_from_resource(Client, Uri) when is_binary(Uri) ->
     gen_server:call(Client, {unsubscribe_resource, Uri}).
 
-with_batch(Client, BatchFun) ->
+-spec with_batch(client(), fun((batch_id()) -> Result)) -> Result when Result :: term().
+with_batch(Client, BatchFun) when is_function(BatchFun, 1) ->
     BatchId = make_ref(),
-    gen_server:call(Client, {start_batch, BatchId}),
+    ok = gen_server:call(Client, {start_batch, BatchId}),
     try
         Result = BatchFun(BatchId),
-        gen_server:call(Client, {execute_batch, BatchId}),
+        {ok, _Count} = gen_server:call(Client, {execute_batch, BatchId}),
         Result
     catch
-        Error:Reason:Stacktrace ->
+        Class:Reason:Stacktrace ->
             gen_server:call(Client, {cancel_batch, BatchId}),
-            erlang:raise(Error, Reason, Stacktrace)
+            erlang:raise(Class, Reason, Stacktrace)
     end.
 
-send_batch_request(Client, BatchId, Method, Params) ->
+-spec send_batch_request(client(), batch_id(), binary(), map()) -> 
+    {ok, request_id()} | {error, term()}.
+send_batch_request(Client, BatchId, Method, Params) 
+  when is_reference(BatchId), is_binary(Method), is_map(Params) ->
     gen_server:call(Client, {add_to_batch, BatchId, Method, Params}).
 
-set_notification_handler(Client, Method, Handler) ->
+-spec set_notification_handler(client(), binary(), notification_handler()) -> ok.
+set_notification_handler(Client, Method, Handler) when is_binary(Method) ->
     gen_server:call(Client, {set_notification_handler, Method, Handler}).
 
-remove_notification_handler(Client, Method) ->
+-spec remove_notification_handler(client(), binary()) -> ok.
+remove_notification_handler(Client, Method) when is_binary(Method) ->
     gen_server:call(Client, {remove_notification_handler, Method}).
 
+-spec set_sampling_handler(client(), sampling_handler()) -> ok.
 set_sampling_handler(Client, Handler) ->
     gen_server:call(Client, {set_sampling_handler, Handler}).
 
+-spec remove_sampling_handler(client()) -> ok.
 remove_sampling_handler(Client) ->
     gen_server:call(Client, remove_sampling_handler).
 
-set_strict_mode(Client, Enabled) ->
+-spec set_strict_mode(client(), boolean()) -> ok.
+set_strict_mode(Client, Enabled) when is_boolean(Enabled) ->
     gen_server:call(Client, {set_strict_mode, Enabled}).
 
+%%====================================================================
+%% gen_server callbacks
+%%====================================================================
+
+-spec init([transport_opts() | client_opts()]) -> {ok, state()}.
 init([TransportOpts, Options]) ->
-    {Transport, TransportState} = init_transport(TransportOpts),
-    StrictMode = maps:get(strict_mode, Options, false),
-    {ok, #state{
-        transport = Transport,
-        transport_state = TransportState,
-        strict_mode = StrictMode,
-        batch_requests = #{},
-        notification_handlers = #{},
-        subscriptions = #{},
-        initialized = false
-    }}.
+    process_flag(trap_exit, true),
+    case init_transport(TransportOpts) of
+        {ok, Transport, TransportState} ->
+            State = #state{
+                transport = Transport,
+                transport_state = TransportState,
+                strict_mode = maps:get(strict_mode, Options, false),
+                timeout = maps:get(timeout, Options, 5000),
+                subscriptions = sets:new()
+            },
+            {ok, State};
+        {error, Reason} ->
+            {stop, Reason}
+    end.
 
-handle_call({initialize, Capabilities, _Options}, _From, State) ->
-    RequestId = State#state.request_id,
-    InitRequest = #{
-        <<"protocolVersion">> => ?MCP_VERSION,
-        <<"capabilities">> => encode_capabilities(Capabilities),
-        <<"clientInfo">> => #{
-            <<"name">> => <<"erlmcp">>,
-            <<"version">> => <<"0.1.0">>
-        }
-    },
-    Json = erlmcp_json_rpc:encode_request(RequestId, <<"initialize">>, InitRequest),
-    case send_message(State, Json) of
-        ok ->
+-spec handle_call(term(), {pid(), term()}, state()) -> 
+    {reply, term(), state()} | 
+    {noreply, state()} |
+    {stop, term(), term(), state()}.
+
+handle_call({initialize, Capabilities, _Options}, From, State) ->
+    Request = build_initialize_request(Capabilities),
+    send_request(State, <<"initialize">>, Request, {initialize, From});
+
+handle_call(list_resources, From, State) ->
+    case ?CHECK_CAPABILITY(State, resources) of
+        do_request ->
+            send_request(State, <<"resources/list">>, #{}, {list_resources, From});
+        Error ->
+            {reply, Error, State}
+    end;
+
+handle_call({read_resource, Uri}, From, State) ->
+    case ?CHECK_CAPABILITY(State, resources) of
+        do_request ->
+            Params = #{<<"uri">> => Uri},
+            send_request(State, <<"resources/read">>, Params, {read_resource, From});
+        Error ->
+            {reply, Error, State}
+    end;
+
+handle_call(list_tools, From, State) ->
+    case ?CHECK_CAPABILITY(State, tools) of
+        do_request ->
+            send_request(State, <<"tools/list">>, #{}, {list_tools, From});
+        Error ->
+            {reply, Error, State}
+    end;
+
+handle_call({call_tool, Name, Arguments}, From, State) ->
+    case ?CHECK_CAPABILITY(State, tools) of
+        do_request ->
+            Params = #{<<"name">> => Name, <<"arguments">> => Arguments},
+            send_request(State, <<"tools/call">>, Params, {call_tool, From});
+        Error ->
+            {reply, Error, State}
+    end;
+
+handle_call(list_prompts, From, State) ->
+    case ?CHECK_CAPABILITY(State, prompts) of
+        do_request ->
+            send_request(State, <<"prompts/list">>, #{}, {list_prompts, From});
+        Error ->
+            {reply, Error, State}
+    end;
+
+handle_call({get_prompt, Name, Arguments}, From, State) ->
+    case ?CHECK_CAPABILITY(State, prompts) of
+        do_request ->
+            Params = build_prompt_params(Name, Arguments),
+            send_request(State, <<"prompts/get">>, Params, {get_prompt, From});
+        Error ->
+            {reply, Error, State}
+    end;
+
+handle_call(list_resource_templates, From, State) ->
+    case ?CHECK_CAPABILITY(State, resources) of
+        do_request ->
+            send_request(State, <<"resources/templates/list">>, #{}, {list_resource_templates, From});
+        Error ->
+            {reply, Error, State}
+    end;
+
+handle_call({subscribe_resource, Uri}, From, State) ->
+    case ?CHECK_CAPABILITY(State, resources) of
+        do_request ->
+            Params = #{<<"uri">> => Uri},
             NewState = State#state{
-                request_id = RequestId + 1,
-                pending_requests = maps:put(RequestId, {initialize, self()}, State#state.pending_requests)
+                subscriptions = sets:add_element(Uri, State#state.subscriptions)
             },
-            {noreply, NewState};
-        {error, Reason} ->
-            {reply, {error, Reason}, State}
+            send_request(NewState, <<"resources/subscribe">>, Params, {subscribe_resource, From});
+        Error ->
+            {reply, Error, State}
     end;
 
-handle_call(list_resources, _From, State) ->
-    case validate_capability(State, resources) of
-        ok ->
-            RequestId = State#state.request_id,
-            Json = erlmcp_json_rpc:encode_request(RequestId, <<"resources/list">>, #{}),
-            case send_message(State, Json) of
-                ok ->
-                    NewState = State#state{
-                        request_id = RequestId + 1,
-                        pending_requests = maps:put(RequestId, {list_resources, self()}, State#state.pending_requests)
-                    },
-                    {noreply, NewState};
-                {error, Reason} ->
-                    {reply, {error, Reason}, State}
-            end;
-        {error, Reason} ->
-            {reply, {error, Reason}, State}
-    end;
-
-handle_call({read_resource, Uri}, _From, State) ->
-    case validate_capability(State, resources) of
-        ok ->
-            RequestId = State#state.request_id,
+handle_call({unsubscribe_resource, Uri}, From, State) ->
+    case ?CHECK_CAPABILITY(State, resources) of
+        do_request ->
             Params = #{<<"uri">> => Uri},
-            Json = erlmcp_json_rpc:encode_request(RequestId, <<"resources/read">>, Params),
-            case send_message(State, Json) of
-                ok ->
-                    NewState = State#state{
-                        request_id = RequestId + 1,
-                        pending_requests = maps:put(RequestId, {read_resource, self()}, State#state.pending_requests)
-                    },
-                    {noreply, NewState};
-                {error, Reason} ->
-                    {reply, {error, Reason}, State}
-            end;
-        {error, Reason} ->
-            {reply, {error, Reason}, State}
-    end;
-
-handle_call(list_tools, _From, State) ->
-    case validate_capability(State, tools) of
-        ok ->
-            RequestId = State#state.request_id,
-            Json = erlmcp_json_rpc:encode_request(RequestId, <<"tools/list">>, #{}),
-            case send_message(State, Json) of
-                ok ->
-                    NewState = State#state{
-                        request_id = RequestId + 1,
-                        pending_requests = maps:put(RequestId, {list_tools, self()}, State#state.pending_requests)
-                    },
-                    {noreply, NewState};
-                {error, Reason} ->
-                    {reply, {error, Reason}, State}
-            end;
-        {error, Reason} ->
-            {reply, {error, Reason}, State}
-    end;
-
-handle_call({call_tool, Name, Arguments}, _From, State) ->
-    case validate_capability(State, tools) of
-        ok ->
-            RequestId = State#state.request_id,
-            Params = #{
-                <<"name">> => Name,
-                <<"arguments">> => Arguments
+            NewState = State#state{
+                subscriptions = sets:del_element(Uri, State#state.subscriptions)
             },
-            Json = erlmcp_json_rpc:encode_request(RequestId, <<"tools/call">>, Params),
-            case send_message(State, Json) of
-                ok ->
-                    NewState = State#state{
-                        request_id = RequestId + 1,
-                        pending_requests = maps:put(RequestId, {call_tool, self()}, State#state.pending_requests)
-                    },
-                    {noreply, NewState};
-                {error, Reason} ->
-                    {reply, {error, Reason}, State}
-            end;
-        {error, Reason} ->
-            {reply, {error, Reason}, State}
-    end;
-
-handle_call(list_prompts, _From, State) ->
-    case validate_capability(State, prompts) of
-        ok ->
-            RequestId = State#state.request_id,
-            Json = erlmcp_json_rpc:encode_request(RequestId, <<"prompts/list">>, #{}),
-            case send_message(State, Json) of
-                ok ->
-                    NewState = State#state{
-                        request_id = RequestId + 1,
-                        pending_requests = maps:put(RequestId, {list_prompts, self()}, State#state.pending_requests)
-                    },
-                    {noreply, NewState};
-                {error, Reason} ->
-                    {reply, {error, Reason}, State}
-            end;
-        {error, Reason} ->
-            {reply, {error, Reason}, State}
-    end;
-
-handle_call({get_prompt, Name, Arguments}, _From, State) ->
-    case validate_capability(State, prompts) of
-        ok ->
-            RequestId = State#state.request_id,
-            Params = case Arguments of
-                #{} when map_size(Arguments) =:= 0 ->
-                    #{<<"name">> => Name};
-                _ ->
-                    #{<<"name">> => Name, <<"arguments">> => Arguments}
-            end,
-            Json = erlmcp_json_rpc:encode_request(RequestId, <<"prompts/get">>, Params),
-            case send_message(State, Json) of
-                ok ->
-                    NewState = State#state{
-                        request_id = RequestId + 1,
-                        pending_requests = maps:put(RequestId, {get_prompt, self()}, State#state.pending_requests)
-                    },
-                    {noreply, NewState};
-                {error, Reason} ->
-                    {reply, {error, Reason}, State}
-            end;
-        {error, Reason} ->
-            {reply, {error, Reason}, State}
-    end;
-
-handle_call(list_resource_templates, _From, State) ->
-    case validate_capability(State, resources) of
-        ok ->
-            RequestId = State#state.request_id,
-            Json = erlmcp_json_rpc:encode_request(RequestId, <<"resources/templates/list">>, #{}),
-            case send_message(State, Json) of
-                ok ->
-                    NewState = State#state{
-                        request_id = RequestId + 1,
-                        pending_requests = maps:put(RequestId, {list_resource_templates, self()}, State#state.pending_requests)
-                    },
-                    {noreply, NewState};
-                {error, Reason} ->
-                    {reply, {error, Reason}, State}
-            end;
-        {error, Reason} ->
-            {reply, {error, Reason}, State}
-    end;
-
-handle_call({subscribe_resource, Uri}, _From, State) ->
-    case validate_capability(State, resources) of
-        ok ->
-            RequestId = State#state.request_id,
-            Params = #{<<"uri">> => Uri},
-            Json = erlmcp_json_rpc:encode_request(RequestId, <<"resources/subscribe">>, Params),
-            case send_message(State, Json) of
-                ok ->
-                    NewState = State#state{
-                        request_id = RequestId + 1,
-                        pending_requests = maps:put(RequestId, {subscribe_resource, self()}, State#state.pending_requests),
-                        subscriptions = maps:put(Uri, true, State#state.subscriptions)
-                    },
-                    {noreply, NewState};
-                {error, Reason} ->
-                    {reply, {error, Reason}, State}
-            end;
-        {error, Reason} ->
-            {reply, {error, Reason}, State}
-    end;
-
-handle_call({unsubscribe_resource, Uri}, _From, State) ->
-    case validate_capability(State, resources) of
-        ok ->
-            RequestId = State#state.request_id,
-            Params = #{<<"uri">> => Uri},
-            Json = erlmcp_json_rpc:encode_request(RequestId, <<"resources/unsubscribe">>, Params),
-            case send_message(State, Json) of
-                ok ->
-                    NewState = State#state{
-                        request_id = RequestId + 1,
-                        pending_requests = maps:put(RequestId, {unsubscribe_resource, self()}, State#state.pending_requests),
-                        subscriptions = maps:remove(Uri, State#state.subscriptions)
-                    },
-                    {noreply, NewState};
-                {error, Reason} ->
-                    {reply, {error, Reason}, State}
-            end;
-        {error, Reason} ->
-            {reply, {error, Reason}, State}
+            send_request(NewState, <<"resources/unsubscribe">>, Params, {unsubscribe_resource, From});
+        Error ->
+            {reply, Error, State}
     end;
 
 handle_call({start_batch, BatchId}, _From, State) ->
-    NewState = State#state{
-        batch_requests = maps:put(BatchId, [], State#state.batch_requests)
-    },
-    {reply, ok, NewState};
+    NewBatches = maps:put(BatchId, [], State#state.batch_requests),
+    {reply, ok, State#state{batch_requests = NewBatches}};
 
 handle_call({add_to_batch, BatchId, Method, Params}, _From, State) ->
-    case maps:get(BatchId, State#state.batch_requests, undefined) of
-        undefined ->
-            {reply, {error, batch_not_found}, State};
-        Requests ->
+    case maps:find(BatchId, State#state.batch_requests) of
+        {ok, Requests} ->
             RequestId = State#state.request_id,
             Request = {RequestId, Method, Params},
             NewRequests = [Request | Requests],
@@ -352,159 +301,230 @@ handle_call({add_to_batch, BatchId, Method, Params}, _From, State) ->
                 request_id = RequestId + 1,
                 batch_requests = maps:put(BatchId, NewRequests, State#state.batch_requests)
             },
-            {reply, {ok, RequestId}, NewState}
+            {reply, {ok, RequestId}, NewState};
+        error ->
+            {reply, {error, batch_not_found}, State}
     end;
 
 handle_call({execute_batch, BatchId}, _From, State) ->
-    case maps:get(BatchId, State#state.batch_requests, undefined) of
-        undefined ->
-            {reply, {error, batch_not_found}, State};
-        Requests ->
-            NewState = State#state{
-                batch_requests = maps:remove(BatchId, State#state.batch_requests)
-            },
-            {reply, {ok, length(Requests)}, NewState}
+    case maps:take(BatchId, State#state.batch_requests) of
+        {Requests, NewBatches} ->
+            NewState = State#state{batch_requests = NewBatches},
+            execute_batch_requests(lists:reverse(Requests), NewState),
+            {reply, {ok, length(Requests)}, NewState};
+        error ->
+            {reply, {error, batch_not_found}, State}
     end;
 
 handle_call({cancel_batch, BatchId}, _From, State) ->
-    NewState = State#state{
-        batch_requests = maps:remove(BatchId, State#state.batch_requests)
-    },
-    {reply, ok, NewState};
+    NewBatches = maps:remove(BatchId, State#state.batch_requests),
+    {reply, ok, State#state{batch_requests = NewBatches}};
 
 handle_call({set_notification_handler, Method, Handler}, _From, State) ->
-    NewState = State#state{
-        notification_handlers = maps:put(Method, Handler, State#state.notification_handlers)
-    },
-    {reply, ok, NewState};
+    NewHandlers = maps:put(Method, Handler, State#state.notification_handlers),
+    {reply, ok, State#state{notification_handlers = NewHandlers}};
 
 handle_call({remove_notification_handler, Method}, _From, State) ->
-    NewState = State#state{
-        notification_handlers = maps:remove(Method, State#state.notification_handlers)
-    },
-    {reply, ok, NewState};
+    NewHandlers = maps:remove(Method, State#state.notification_handlers),
+    {reply, ok, State#state{notification_handlers = NewHandlers}};
 
 handle_call({set_sampling_handler, Handler}, _From, State) ->
-    NewState = State#state{
-        sampling_handler = Handler
-    },
-    {reply, ok, NewState};
+    {reply, ok, State#state{sampling_handler = Handler}};
 
 handle_call(remove_sampling_handler, _From, State) ->
-    NewState = State#state{
-        sampling_handler = undefined
-    },
-    {reply, ok, NewState};
+    {reply, ok, State#state{sampling_handler = undefined}};
 
 handle_call({set_strict_mode, Enabled}, _From, State) ->
-    NewState = State#state{
-        strict_mode = Enabled
-    },
-    {reply, ok, NewState};
+    {reply, ok, State#state{strict_mode = Enabled}};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
+-spec handle_cast(term(), state()) -> {noreply, state()}.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+-spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info({transport_message, Data}, State) ->
     case erlmcp_json_rpc:decode_message(Data) of
-        {ok, #json_rpc_response{id = Id, result = Result}} ->
-            handle_response(Id, Result, State);
+        {ok, #json_rpc_response{id = Id, result = Result, error = undefined}} ->
+            handle_response(Id, {ok, Result}, State);
         {ok, #json_rpc_response{id = Id, error = Error}} ->
-            handle_error_response(Id, Error, State);
+            handle_response(Id, {error, Error}, State);
         {ok, #json_rpc_notification{method = Method, params = Params}} ->
             handle_notification(Method, Params, State);
         {error, Reason} ->
-            error_logger:error_msg("Failed to decode message: ~p~n", [Reason]),
+            logger:error("Failed to decode message: ~p", [Reason]),
             {noreply, State}
     end;
+
+handle_info({'EXIT', Pid, Reason}, State) when Pid =:= State#state.transport_state ->
+    logger:error("Transport process died: ~p", [Reason]),
+    {stop, {transport_died, Reason}, State};
 
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, _State) ->
+-spec terminate(term(), state()) -> ok.
+terminate(_Reason, State) ->
+    close_transport(State),
     ok.
 
+-spec code_change(term(), state(), term()) -> {ok, state()}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+%%====================================================================
+%% Internal functions
+%%====================================================================
+
+-spec init_transport(transport_opts()) -> 
+    {ok, module(), term()} | {error, term()}.
 init_transport({stdio, _Opts}) ->
-    {erlmcp_transport_stdio, undefined};
+    {ok, erlmcp_transport_stdio, self()};
 init_transport({tcp, Opts}) ->
-    {erlmcp_transport_tcp, Opts};
+    {ok, erlmcp_transport_tcp, Opts};
 init_transport({http, Opts}) ->
     case erlmcp_transport_http:init(Opts) of
-        {ok, State} -> {erlmcp_transport_http, State};
-        {error, Reason} -> {error, Reason}
+        {ok, State} -> {ok, erlmcp_transport_http, State};
+        {error, _} = Error -> Error
     end.
 
+-spec close_transport(state()) -> ok.
+close_transport(#state{transport = Transport, transport_state = TransportState}) ->
+    catch Transport:close(TransportState),
+    ok.
+
+-spec send_request(state(), binary(), map(), {atom(), pid()}) -> 
+    {noreply, state()} | {reply, {error, term()}, state()}.
+send_request(State, Method, Params, RequestInfo) ->
+    RequestId = State#state.request_id,
+    Json = erlmcp_json_rpc:encode_request(RequestId, Method, Params),
+    case send_message(State, Json) of
+        ok ->
+            NewState = State#state{
+                request_id = RequestId + 1,
+                pending_requests = maps:put(RequestId, RequestInfo, State#state.pending_requests)
+            },
+            {noreply, NewState};
+        {error, Reason} ->
+            {_, From} = RequestInfo,
+            {reply, {error, Reason}, State}
+    end.
+
+-spec send_message(state(), binary()) -> ok | {error, term()}.
 send_message(#state{transport = Transport, transport_state = TransportState}, Message) ->
     Transport:send(TransportState, Message).
 
-encode_capabilities(#mcp_client_capabilities{roots = Roots, sampling = Sampling, experimental = Experimental}) ->
-    Caps = #{},
-    Caps1 = case Roots of
-        #mcp_capability{enabled = true} ->
-            Caps#{<<"roots">> => #{<<"listChanged">> => true}};
-        _ -> Caps
-    end,
-    Caps2 = case Sampling of
-        #mcp_capability{enabled = true} ->
-            Caps1#{<<"sampling">> => #{}};
-        _ -> Caps1
-    end,
-    case Experimental of
-        undefined -> Caps2;
-        ExpMap when is_map(ExpMap) -> maps:merge(Caps2, ExpMap);
-        _ -> Caps2
-    end;
-encode_capabilities(undefined) ->
-    #{}.
+-spec build_initialize_request(#mcp_client_capabilities{}) -> map().
+build_initialize_request(Capabilities) ->
+    #{
+        <<"protocolVersion">> => ?MCP_VERSION,
+        <<"capabilities">> => encode_capabilities(Capabilities),
+        <<"clientInfo">> => #{
+            <<"name">> => <<"erlmcp">>,
+            <<"version">> => <<"0.1.0">>
+        }
+    }.
 
-validate_capability(State, _Capability) when not State#state.strict_mode ->
+-spec build_prompt_params(binary(), map()) -> map().
+build_prompt_params(Name, Arguments) when map_size(Arguments) =:= 0 ->
+    #{<<"name">> => Name};
+build_prompt_params(Name, Arguments) ->
+    #{<<"name">> => Name, <<"arguments">> => Arguments}.
+
+-spec encode_capabilities(#mcp_client_capabilities{}) -> map().
+encode_capabilities(#mcp_client_capabilities{} = Caps) ->
+    Base = #{},
+    Base1 = maybe_add_capability(Base, <<"roots">>, Caps#mcp_client_capabilities.roots),
+    Base2 = maybe_add_capability(Base1, <<"sampling">>, Caps#mcp_client_capabilities.sampling),
+    maybe_merge_experimental(Base2, Caps#mcp_client_capabilities.experimental).
+
+-spec maybe_add_capability(map(), binary(), #mcp_capability{} | undefined) -> map().
+maybe_add_capability(Map, _Key, undefined) ->
+    Map;
+maybe_add_capability(Map, Key, #mcp_capability{enabled = true}) ->
+    Map#{Key => #{}};
+maybe_add_capability(Map, _Key, _) ->
+    Map.
+
+-spec maybe_merge_experimental(map(), map() | undefined) -> map().
+maybe_merge_experimental(Map, undefined) ->
+    Map;
+maybe_merge_experimental(Map, Experimental) when is_map(Experimental) ->
+    maps:merge(Map, Experimental);
+maybe_merge_experimental(Map, _) ->
+    Map.
+
+-spec validate_capability(state(), atom()) -> ok | {error, term()}.
+validate_capability(#state{strict_mode = false}, _) ->
     ok;
-validate_capability(State, _Capability) when not State#state.initialized ->
+validate_capability(#state{initialized = false}, _) ->
     {error, not_initialized};
-validate_capability(State, Capability) ->
-    check_server_capability(State#state.capabilities, Capability).
-
-check_server_capability(undefined, _Capability) ->
+validate_capability(#state{capabilities = undefined}, _) ->
     {error, no_server_capabilities};
-check_server_capability(Capabilities, resources) ->
-    case Capabilities#mcp_server_capabilities.resources of
-        #mcp_capability{enabled = true} -> ok;
-        _ -> {error, capability_not_supported}
-    end;
-check_server_capability(Capabilities, tools) ->
-    case Capabilities#mcp_server_capabilities.tools of
-        #mcp_capability{enabled = true} -> ok;
-        _ -> {error, capability_not_supported}
-    end;
-check_server_capability(Capabilities, prompts) ->
-    case Capabilities#mcp_server_capabilities.prompts of
-        #mcp_capability{enabled = true} -> ok;
-        _ -> {error, capability_not_supported}
-    end;
-check_server_capability(_Capabilities, logging) ->
-    ok;
-check_server_capability(_Capabilities, _Capability) ->
+validate_capability(#state{capabilities = Caps}, Capability) ->
+    check_server_capability(Caps, Capability).
+
+-spec check_server_capability(#mcp_server_capabilities{}, atom()) -> 
+    ok | {error, capability_not_supported}.
+check_server_capability(Caps, resources) ->
+    check_capability_enabled(Caps#mcp_server_capabilities.resources);
+check_server_capability(Caps, tools) ->
+    check_capability_enabled(Caps#mcp_server_capabilities.tools);
+check_server_capability(Caps, prompts) ->
+    check_capability_enabled(Caps#mcp_server_capabilities.prompts);
+check_server_capability(_Caps, _) ->
     ok.
 
+-spec check_capability_enabled(#mcp_capability{} | undefined) -> 
+    ok | {error, capability_not_supported}.
+check_capability_enabled(#mcp_capability{enabled = true}) ->
+    ok;
+check_capability_enabled(_) ->
+    {error, capability_not_supported}.
+
+-spec handle_response(request_id(), {ok, map()} | {error, map()}, state()) -> 
+    {noreply, state()}.
+handle_response(Id, Result, State) ->
+    case maps:take(Id, State#state.pending_requests) of
+        {{initialize, From}, NewPending} ->
+            gen_server:reply(From, Result),
+            case Result of
+                {ok, InitResult} ->
+                    ServerCapabilities = extract_server_capabilities(InitResult),
+                    NewState = State#state{
+                        pending_requests = NewPending,
+                        capabilities = ServerCapabilities,
+                        initialized = true
+                    },
+                    {noreply, NewState};
+                {error, _} ->
+                    {noreply, State#state{pending_requests = NewPending}}
+            end;
+        {{_RequestType, From}, NewPending} ->
+            gen_server:reply(From, Result),
+            {noreply, State#state{pending_requests = NewPending}};
+        error ->
+            logger:warning("Received response for unknown request ID: ~p", [Id]),
+            {noreply, State}
+    end.
+
+-spec extract_server_capabilities(map()) -> #mcp_server_capabilities{} | undefined.
 extract_server_capabilities(InitResult) ->
-    case maps:get(<<"capabilities">>, InitResult, #{}) of
+    case maps:get(<<"capabilities">>, InitResult, undefined) of
+        undefined ->
+            undefined;
         Caps when is_map(Caps) ->
             #mcp_server_capabilities{
                 resources = extract_capability(maps:get(<<"resources">>, Caps, undefined)),
                 tools = extract_capability(maps:get(<<"tools">>, Caps, undefined)),
                 prompts = extract_capability(maps:get(<<"prompts">>, Caps, undefined)),
                 logging = extract_capability(maps:get(<<"logging">>, Caps, undefined))
-            };
-        _ ->
-            undefined
+            }
     end.
 
+-spec extract_capability(map() | undefined) -> #mcp_capability{} | undefined.
 extract_capability(undefined) ->
     undefined;
 extract_capability(Cap) when is_map(Cap) ->
@@ -512,107 +532,69 @@ extract_capability(Cap) when is_map(Cap) ->
 extract_capability(_) ->
     undefined.
 
-handle_sampling_request(Method, Params, State) ->
-    case State#state.sampling_handler of
-        undefined ->
-            error_logger:warning_msg("Received sampling request but no handler set: ~p~n", [Method]),
-            {noreply, State};
-        Handler when is_function(Handler) ->
-            spawn(fun() -> Handler(Method, Params) end),
-            {noreply, State};
-        {Module, Function} ->
-            spawn(fun() -> Module:Function(Method, Params) end),
-            {noreply, State};
-        Pid when is_pid(Pid) ->
-            Pid ! {sampling_request, Method, Params},
-            {noreply, State}
-    end.
+-spec handle_notification(binary(), map(), state()) -> {noreply, state()}.
+handle_notification(<<"sampling/createMessage">> = Method, Params, State) ->
+    spawn_handler(State#state.sampling_handler, Method, Params),
+    {noreply, State};
 
-handle_resource_update(Params, State) ->
-    Uri = maps:get(<<"uri">>, Params, undefined),
-    case maps:get(Uri, State#state.subscriptions, undefined) of
+handle_notification(<<"resources/updated">> = Method, Params, State) ->
+    case maps:get(<<"uri">>, Params, undefined) of
         undefined ->
             {noreply, State};
-        _ ->
-            case maps:get(<<"resources/updated">>, State#state.notification_handlers, undefined) of
-                undefined ->
-                    error_logger:info_msg("Resource updated but no handler: ~p~n", [Uri]),
-                    {noreply, State};
-                Handler when is_function(Handler) ->
-                    spawn(fun() -> Handler(<<"resources/updated">>, Params) end),
-                    {noreply, State};
-                {Module, Function} ->
-                    spawn(fun() -> Module:Function(<<"resources/updated">>, Params) end),
+        Uri ->
+            case sets:is_element(Uri, State#state.subscriptions) of
+                true ->
+                    invoke_notification_handler(Method, Params, State);
+                false ->
                     {noreply, State}
             end
-    end.
+    end;
 
-handle_resource_list_changed(Params, State) ->
-    case maps:get(<<"resources/list_changed">>, State#state.notification_handlers, undefined) of
-        undefined ->
-            error_logger:info_msg("Resource list changed but no handler~n"),
-            {noreply, State};
-        Handler when is_function(Handler) ->
-            spawn(fun() -> Handler(<<"resources/list_changed">>, Params) end),
-            {noreply, State};
-        {Module, Function} ->
-            spawn(fun() -> Module:Function(<<"resources/list_changed">>, Params) end),
-            {noreply, State}
-    end.
-
-handle_response(Id, Result, State) ->
-    case maps:get(Id, State#state.pending_requests, undefined) of
-        {initialize, From} ->
-            gen_server:reply(From, {ok, Result}),
-            ServerCapabilities = extract_server_capabilities(Result),
-            NewState = State#state{
-                pending_requests = maps:remove(Id, State#state.pending_requests),
-                capabilities = ServerCapabilities,
-                initialized = true
-            },
-            {noreply, NewState};
-        {RequestType, From} ->
-            gen_server:reply(From, {ok, Result}),
-            NewState = State#state{
-                pending_requests = maps:remove(Id, State#state.pending_requests)
-            },
-            {noreply, NewState};
-        undefined ->
-            error_logger:warning_msg("Received response for unknown request ID: ~p~n", [Id]),
-            {noreply, State}
-    end.
-
-handle_error_response(Id, Error, State) ->
-    case maps:get(Id, State#state.pending_requests, undefined) of
-        {_RequestType, From} ->
-            gen_server:reply(From, {error, Error}),
-            NewState = State#state{
-                pending_requests = maps:remove(Id, State#state.pending_requests)
-            },
-            {noreply, NewState};
-        undefined ->
-            error_logger:warning_msg("Received error response for unknown request ID: ~p~n", [Id]),
-            {noreply, State}
-    end.
+handle_notification(<<"resources/list_changed">> = Method, Params, State) ->
+    invoke_notification_handler(Method, Params, State);
 
 handle_notification(Method, Params, State) ->
-    case Method of
-        <<"sampling/createMessage">> ->
-            handle_sampling_request(Method, Params, State);
-        <<"resources/updated">> ->
-            handle_resource_update(Params, State);
-        <<"resources/list_changed">> ->
-            handle_resource_list_changed(Params, State);
-        _ ->
-            case maps:get(Method, State#state.notification_handlers, undefined) of
-                undefined ->
-                    error_logger:info_msg("Unhandled notification: ~p~n", [Method]),
-                    {noreply, State};
-                Handler when is_function(Handler) ->
-                    spawn(fun() -> Handler(Method, Params) end),
-                    {noreply, State};
-                {Module, Function} ->
-                    spawn(fun() -> Module:Function(Method, Params) end),
-                    {noreply, State}
-            end
+    invoke_notification_handler(Method, Params, State).
+
+-spec invoke_notification_handler(binary(), map(), state()) -> {noreply, state()}.
+invoke_notification_handler(Method, Params, State) ->
+    case maps:get(Method, State#state.notification_handlers, undefined) of
+        undefined ->
+            logger:info("Unhandled notification: ~p", [Method]),
+            {noreply, State};
+        Handler ->
+            spawn_handler(Handler, Method, Params),
+            {noreply, State}
     end.
+
+-spec spawn_handler(notification_handler() | undefined, binary(), map()) -> ok.
+spawn_handler(undefined, Method, _Params) ->
+    logger:warning("No handler for: ~p", [Method]),
+    ok;
+spawn_handler(Handler, Method, Params) when is_function(Handler, 2) ->
+    spawn(fun() -> 
+        try Handler(Method, Params)
+        catch Class:Reason:Stack ->
+            logger:error("Handler crashed: ~p:~p~n~p", [Class, Reason, Stack])
+        end
+    end),
+    ok;
+spawn_handler({Module, Function}, Method, Params) ->
+    spawn(fun() -> 
+        try Module:Function(Method, Params)
+        catch Class:Reason:Stack ->
+            logger:error("Handler crashed: ~p:~p~n~p", [Class, Reason, Stack])
+        end
+    end),
+    ok;
+spawn_handler(Pid, Method, Params) when is_pid(Pid) ->
+    Pid ! {sampling_request, Method, Params},
+    ok.
+
+-spec execute_batch_requests([{request_id(), binary(), map()}], state()) -> ok.
+execute_batch_requests([], _State) ->
+    ok;
+execute_batch_requests([{RequestId, Method, Params} | Rest], State) ->
+    Json = erlmcp_json_rpc:encode_request(RequestId, Method, Params),
+    send_message(State, Json),
+    execute_batch_requests(Rest, State).
