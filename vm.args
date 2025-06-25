@@ -1,0 +1,66 @@
+## Name of the node
+-name erlmcp@127.0.0.1
+
+## Cookie for distributed node communication
+-setcookie erlmcp_secret_cookie
+
+## Heartbeat management; auto-restarts VM if it dies or becomes unresponsive
+-heart
+
+## Enable kernel poll
++K true
+
+## Increase number of concurrent ports/sockets
+-env ERL_MAX_PORTS 8192
+
+## Increase number of processes
++P 1000000
+
+## Increase atom table size
++t 5000000
+
+## Enable time correction
++c true
+
+## Set scheduler bind type
++sbt db
+
+## Enable busy wait for better latency
++sbwt very_short
+
+## Async thread pool size
++A 64
+
+## Max ETS tables
+-env ERL_MAX_ETS_TABLES 50000
+
+## Enable microstate accounting
++Muacul true
+
+## Enable scheduler utilization balancing
++sub true
+
+## Distribution buffer busy limit (KB)
++zdbbl 8192
+
+## Set the logger burst limit
+-kernel logger_burst_limit 5000
+
+## Enable more detailed crash dumps
+-env ERL_CRASH_DUMP_SECONDS 10
+
+## Path to crash dumps
+-env ERL_CRASH_DUMP ./logs/erl_crash.dump
+
+## Enable system monitor
+-env ERLMCP_SYSTEM_MONITOR true
+
+## Memory allocator settings for better performance
++MBas aobf
++MBlmbcs 512
++MBsmbcs 1024
++MBsbct 2048
+
+## Garbage collection settings
++hms 46422
++hmbs 46422

@@ -1,17 +1,69 @@
+# Erlang/OTP
 .eunit
+deps
 *.o
 *.beam
 *.plt
 erl_crash.dump
-.concrete/DEV_MODE
-
-# rebar 2.x
-.rebar
-rel/example_project
 ebin/*.beam
-deps
-
-# rebar 3
-.rebar3
+rel/example_project
+.concrete/DEV_MODE
+.rebar
 _build/
+rebar3.crashdump
+*~
+
+# Logs
+logs/
+*.log
+
+# Coverage
+cover/
+.cover/
+*.coverdata
+_build/test/cover/
+
+# Documentation
+doc/
+_doc/
+
+# Dialyzer
+.dialyzer_plt
+*.plt
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Dependencies
 _checkouts/
+
+# Release artifacts
+_rel/
+
+# Temporary files
+*.tmp
+*.temp
+.#*
+
+# OS specific
+Thumbs.db
+.DS_Store
+
+# Project specific
+priv/ssl/*.pem
+priv/ssl/*.key
+config/prod.config
+config/dev.config
+
+# Crash dumps
+erl_crash.dump*
+core
+core.*
+
+# Lock files (keep rebar.lock)
+# rebar.lock

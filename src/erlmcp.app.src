@@ -1,15 +1,59 @@
 {application, erlmcp,
  [{description, "Erlang Model Context Protocol (MCP) SDK"},
-  {vsn, "0.2.0"},
-  {registered, []},
+  {vsn, "0.2.1"},
+  {registered, [
+      erlmcp_sup,
+      erlmcp_client_sup,
+      erlmcp_server_sup
+  ]},
   {applications, [
       kernel,
       stdlib,
-      jsx
+      ssl,
+      inets,
+      jsx,
+      jesse
   ]},
   {mod, {erlmcp_app, []}},
-  {env, []},
+  {env, [
+      {client_defaults, #{
+          timeout => 5000,
+          strict_mode => false,
+          max_pending_requests => 100
+      }},
+      {server_defaults, #{
+          max_subscriptions_per_resource => 1000,
+          max_progress_tokens => 10000
+      }},
+      {transport_defaults, #{
+          tcp => #{
+              connect_timeout => 5000,
+              keepalive => true,
+              nodelay => true
+          },
+          http => #{
+              connect_timeout => 5000,
+              request_timeout => 30000,
+              max_connections => 100
+          }
+      }}
+  ]},
   {modules, []},
   {licenses, ["Apache-2.0"]},
-  {links, [{"GitHub", "https://github.com/banyan-platform/erlmcp"}]}
+  {links, [{"GitHub", "https://github.com/banyan-platform/erlmcp"}]},
+  {build_tools, ["rebar3"]},
+  {files, ["src", "include", "priv", "rebar.config", "README.md", "LICENSE"]},
+  
+  %% OTP application upgrade instructions
+  {runtime_dependencies, [
+      "kernel-6.0",
+      "stdlib-3.9",
+      "ssl-9.0",
+      "inets-7.0"
+  ]},
+  
+  %% Additional metadata
+  {maintainers, ["Your Name"]},
+  {exclude_files, ["test/*.erl", "logs/*"]},
+  {include_files, ["include/*.hrl"]}
  ]}.
