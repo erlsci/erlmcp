@@ -15,7 +15,7 @@ MCP enables seamless communication between AI assistants and local services thro
 ```bash
 # Add to your rebar.config deps
 {deps, [
-    {erlmcp, {git, "https://github.com/banyan-platform/erlmcp.git", {branch, "main"}}}
+    {erlmcp, {git, "https://github.com/erlsci/erlmcp.git", {branch, "main"}}}
 ]}.
 
 # Fetch and compile
