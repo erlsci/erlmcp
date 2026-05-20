@@ -1,32 +1,29 @@
 -module(erlmcp_stdio_server).
+
 -behaviour(gen_server).
 
 -include("erlmcp.hrl").
 
 %% API exports
--export([
-    start_link/1,
-    add_tool/3, add_tool/4,
-    add_resource/3, add_resource/4,
-    add_prompt/3, add_prompt/4,
-    stop/0
-]).
-
+-export([start_link/1, add_tool/3, add_tool/4, add_resource/3, add_resource/4,
+         add_prompt/3, add_prompt/4, stop/0]).
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
+         code_change/3]).
 
 %% Types
 -type tool_handler() :: fun((map()) -> binary() | iolist()).
 -type resource_handler() :: fun((binary()) -> binary() | iolist()).
 -type prompt_handler() :: fun((map()) -> binary() | iolist() | [map()]).
 
--record(state, {
-    tools = #{} :: #{binary() => {binary(), tool_handler(), map() | undefined}},
-    resources = #{} :: #{binary() => {binary(), resource_handler()} | {binary(), resource_handler(), binary()}},
-    prompts = #{} :: #{binary() => {binary(), prompt_handler(), [map()] | undefined}},
-    initialized = false :: boolean(),
-    reader_pid :: pid() | undefined
-}).
+-record(state,
+        {tools = #{} :: #{binary() => {binary(), tool_handler(), map() | undefined}},
+         resources = #{} ::
+             #{binary() =>
+                   {binary(), resource_handler()} | {binary(), resource_handler(), binary()}},
+         prompts = #{} :: #{binary() => {binary(), prompt_handler(), [map()] | undefined}},
+         initialized = false :: boolean(),
+         reader_pid :: pid() | undefined}).
 
 -type state() :: #state{}.
 
@@ -42,24 +39,30 @@ start_link(Options) ->
 add_tool(Name, Description, Handler) ->
     add_tool(Name, Description, Handler, undefined).
 
--spec add_tool(binary(), binary(), tool_handler(), map() | undefined) -> ok | {error, term()}.
-add_tool(Name, Description, Handler, Schema) when is_binary(Name), is_binary(Description), is_function(Handler, 1) ->
+-spec add_tool(binary(), binary(), tool_handler(), map() | undefined) ->
+                  ok | {error, term()}.
+add_tool(Name, Description, Handler, Schema)
+    when is_binary(Name), is_binary(Description), is_function(Handler, 1) ->
     gen_server:call(?MODULE, {add_tool, Name, Description, Handler, Schema}).
 
 -spec add_resource(binary(), binary(), resource_handler()) -> ok | {error, term()}.
 add_resource(Uri, Description, Handler) ->
     add_resource(Uri, Description, Handler, <<"text/plain">>).
 
--spec add_resource(binary(), binary(), resource_handler(), binary()) -> ok | {error, term()}.
-add_resource(Uri, Description, Handler, MimeType) when is_binary(Uri), is_binary(Description), is_function(Handler, 1) ->
+-spec add_resource(binary(), binary(), resource_handler(), binary()) ->
+                      ok | {error, term()}.
+add_resource(Uri, Description, Handler, MimeType)
+    when is_binary(Uri), is_binary(Description), is_function(Handler, 1) ->
     gen_server:call(?MODULE, {add_resource, Uri, Description, Handler, MimeType}).
 
 -spec add_prompt(binary(), binary(), prompt_handler()) -> ok | {error, term()}.
 add_prompt(Name, Description, Handler) ->
     add_prompt(Name, Description, Handler, undefined).
 
--spec add_prompt(binary(), binary(), prompt_handler(), [map()] | undefined) -> ok | {error, term()}.
-add_prompt(Name, Description, Handler, Arguments) when is_binary(Name), is_binary(Description), is_function(Handler, 1) ->
+-spec add_prompt(binary(), binary(), prompt_handler(), [map()] | undefined) ->
+                    ok | {error, term()}.
+add_prompt(Name, Description, Handler, Arguments)
+    when is_binary(Name), is_binary(Description), is_function(Handler, 1) ->
     gen_server:call(?MODULE, {add_prompt, Name, Description, Handler, Arguments}).
 
 -spec stop() -> ok.
@@ -98,15 +101,12 @@ init([_Options]) ->
 handle_call({add_tool, Name, Description, Handler, Schema}, _From, State) ->
     NewTools = maps:put(Name, {Description, Handler, Schema}, State#state.tools),
     {reply, ok, State#state{tools = NewTools}};
-
 handle_call({add_resource, Uri, Description, Handler, MimeType}, _From, State) ->
     NewResources = maps:put(Uri, {Description, Handler, MimeType}, State#state.resources),
     {reply, ok, State#state{resources = NewResources}};
-
 handle_call({add_prompt, Name, Description, Handler, Arguments}, _From, State) ->
     NewPrompts = maps:put(Name, {Description, Handler, Arguments}, State#state.prompts),
     {reply, ok, State#state{prompts = NewPrompts}};
-
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -119,7 +119,6 @@ handle_info({stdin_line, Line}, State) ->
     logger:info("Received stdin line: ~s", [Line]),
     NewState = handle_json_rpc_message(Line, State),
     {noreply, NewState};
-
 handle_info({'EXIT', Pid, Reason}, #state{reader_pid = Pid} = State) ->
     logger:info("Stdin reader process ~p exited with reason: ~p", [Pid, Reason]),
     case Reason of
@@ -130,7 +129,6 @@ handle_info({'EXIT', Pid, Reason}, #state{reader_pid = Pid} = State) ->
             logger:error("Stdin reader died: ~p", [Reason]),
             {stop, {reader_died, Reason}, State}
     end;
-
 handle_info(Info, State) ->
     logger:warning("Unexpected info message: ~p", [Info]),
     {noreply, State}.
@@ -198,7 +196,8 @@ read_stdin_line() ->
             logger:error("io:get_line not supported in this environment"),
             {error, enotsup};
         Error:ExceptionReason:Stack ->
-            logger:error("Exception in read_stdin_line: ~p:~p~n~p", [Error, ExceptionReason, Stack]),
+            logger:error("Exception in read_stdin_line: ~p:~p~n~p",
+                         [Error, ExceptionReason, Stack]),
             {error, {exception, Error, ExceptionReason}}
     end.
 
@@ -231,22 +230,17 @@ handle_json_rpc_message(Message, State) ->
 -spec handle_initialize(term(), map(), state()) -> state().
 handle_initialize(Id, _Request, State) ->
     logger:info("Building initialize response for ID: ~p", [Id]),
-    Response = #{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"id">> => Id,
-        <<"result">> => #{
-            <<"protocolVersion">> => ?MCP_VERSION,
-            <<"capabilities">> => #{
-                <<"tools">> => #{<<"listChanged">> => false},
-                <<"resources">> => #{<<"subscribe">> => false, <<"listChanged">> => false},
-                <<"prompts">> => #{<<"listChanged">> => false}
-            },
-            <<"serverInfo">> => #{
-                <<"name">> => <<"erlmcp-stdio">>,
-                <<"version">> => <<"1.0.0">>
-            }
-        }
-    },
+    Response =
+        #{<<"jsonrpc">> => <<"2.0">>,
+          <<"id">> => Id,
+          <<"result">> =>
+              #{<<"protocolVersion">> => ?MCP_VERSION,
+                <<"capabilities">> =>
+                    #{<<"tools">> => #{<<"listChanged">> => false},
+                      <<"resources">> => #{<<"subscribe">> => false, <<"listChanged">> => false},
+                      <<"prompts">> => #{<<"listChanged">> => false}},
+                <<"serverInfo">> =>
+                    #{<<"name">> => <<"erlmcp-stdio">>, <<"version">> => <<"1.0.0">>}}},
     logger:info("Sending initialize response: ~p", [Response]),
     send_response(Response),
     logger:info("Initialize response sent, marking as initialized"),
@@ -256,61 +250,49 @@ handle_initialize(Id, _Request, State) ->
 handle_method_call(<<"tools/list">>, Id, _Request, State) ->
     logger:info("Handling tools/list request"),
     Tools = build_tools_list(State),
-    Response = #{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"id">> => Id,
-        <<"result">> => #{<<"tools">> => Tools}
-    },
+    Response =
+        #{<<"jsonrpc">> => <<"2.0">>,
+          <<"id">> => Id,
+          <<"result">> => #{<<"tools">> => Tools}},
     send_response(Response),
     State;
-
 handle_method_call(<<"tools/call">>, Id, #{<<"params">> := Params}, State) ->
     logger:info("Handling tools/call request with params: ~p", [Params]),
     handle_tool_call(Id, Params, State),
     State;
-
 handle_method_call(<<"resources/list">>, Id, _Request, State) ->
     logger:info("Handling resources/list request"),
     Resources = build_resources_list(State),
-    Response = #{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"id">> => Id,
-        <<"result">> => #{<<"resources">> => Resources}
-    },
+    Response =
+        #{<<"jsonrpc">> => <<"2.0">>,
+          <<"id">> => Id,
+          <<"result">> => #{<<"resources">> => Resources}},
     send_response(Response),
     State;
-
 handle_method_call(<<"resources/read">>, Id, #{<<"params">> := Params}, State) ->
     logger:info("Handling resources/read request with params: ~p", [Params]),
     handle_resource_read(Id, Params, State),
     State;
-
 handle_method_call(<<"prompts/list">>, Id, _Request, State) ->
     logger:info("Handling prompts/list request"),
     Prompts = build_prompts_list(State),
-    Response = #{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"id">> => Id,
-        <<"result">> => #{<<"prompts">> => Prompts}
-    },
+    Response =
+        #{<<"jsonrpc">> => <<"2.0">>,
+          <<"id">> => Id,
+          <<"result">> => #{<<"prompts">> => Prompts}},
     send_response(Response),
     State;
-
 handle_method_call(<<"prompts/get">>, Id, #{<<"params">> := Params}, State) ->
     logger:info("Handling prompts/get request with params: ~p", [Params]),
     handle_prompt_get(Id, Params, State),
     State;
-
 handle_method_call(Method, Id, _Request, State) ->
     logger:warning("Unknown method: ~s", [Method]),
-    Error = #{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"id">> => Id,
-        <<"error">> => #{
-            <<"code">> => -32601,
-            <<"message">> => <<"Method not found: ", Method/binary>>
-        }
-    },
+    Error =
+        #{<<"jsonrpc">> => <<"2.0">>,
+          <<"id">> => Id,
+          <<"error">> =>
+              #{<<"code">> => -32601, <<"message">> => <<"Method not found: ", Method/binary>>}},
     send_response(Error),
     State.
 
@@ -321,49 +303,52 @@ handle_method_call(Method, Id, _Request, State) ->
 -spec build_tools_list(state()) -> [map()].
 build_tools_list(State) ->
     maps:fold(fun(Name, {Description, _Handler, Schema}, Acc) ->
-        Tool = #{
-            <<"name">> => Name,
-            <<"description">> => Description
-        },
-        ToolWithSchema = case Schema of
-            undefined -> Tool;
-            _ -> Tool#{<<"inputSchema">> => Schema}
-        end,
-        [ToolWithSchema | Acc]
-    end, [], State#state.tools).
+                 Tool = #{<<"name">> => Name, <<"description">> => Description},
+                 ToolWithSchema =
+                     case Schema of
+                         undefined ->
+                             Tool;
+                         _ ->
+                             Tool#{<<"inputSchema">> => Schema}
+                     end,
+                 [ToolWithSchema | Acc]
+              end,
+              [],
+              State#state.tools).
 
 -spec build_resources_list(state()) -> [map()].
 build_resources_list(State) ->
-    maps:fold(fun
-        (Uri, {Description, _Handler}, Acc) ->
-            Resource = #{
-                <<"uri">> => Uri,
-                <<"name">> => Description,
-                <<"mimeType">> => <<"text/plain">>
-            },
-            [Resource | Acc];
-        (Uri, {Description, _Handler, MimeType}, Acc) ->
-            Resource = #{
-                <<"uri">> => Uri,
-                <<"name">> => Description,
-                <<"mimeType">> => MimeType
-            },
-            [Resource | Acc]
-    end, [], State#state.resources).
+    maps:fold(fun (Uri, {Description, _Handler}, Acc) ->
+                      Resource =
+                          #{<<"uri">> => Uri,
+                            <<"name">> => Description,
+                            <<"mimeType">> => <<"text/plain">>},
+                      [Resource | Acc];
+                  (Uri, {Description, _Handler, MimeType}, Acc) ->
+                      Resource =
+                          #{<<"uri">> => Uri,
+                            <<"name">> => Description,
+                            <<"mimeType">> => MimeType},
+                      [Resource | Acc]
+              end,
+              [],
+              State#state.resources).
 
 -spec build_prompts_list(state()) -> [map()].
 build_prompts_list(State) ->
     maps:fold(fun(Name, {Description, _Handler, Arguments}, Acc) ->
-        Prompt = #{
-            <<"name">> => Name,
-            <<"description">> => Description
-        },
-        PromptWithArgs = case Arguments of
-            undefined -> Prompt;
-            _ -> Prompt#{<<"arguments">> => Arguments}
-        end,
-        [PromptWithArgs | Acc]
-    end, [], State#state.prompts).
+                 Prompt = #{<<"name">> => Name, <<"description">> => Description},
+                 PromptWithArgs =
+                     case Arguments of
+                         undefined ->
+                             Prompt;
+                         _ ->
+                             Prompt#{<<"arguments">> => Arguments}
+                     end,
+                 [PromptWithArgs | Acc]
+              end,
+              [],
+              State#state.prompts).
 
 %%====================================================================
 %% Internal Functions - Handler Execution
@@ -375,55 +360,40 @@ handle_tool_call(Id, #{<<"name">> := Name, <<"arguments">> := Arguments}, State)
     case maps:get(Name, State#state.tools, undefined) of
         undefined ->
             logger:warning("Tool not found: ~s", [Name]),
-            Error = #{
-                <<"jsonrpc">> => <<"2.0">>,
-                <<"id">> => Id,
-                <<"error">> => #{
-                    <<"code">> => -32601,
-                    <<"message">> => <<"Tool not found">>
-                }
-            },
+            Error =
+                #{<<"jsonrpc">> => <<"2.0">>,
+                  <<"id">> => Id,
+                  <<"error">> => #{<<"code">> => -32601, <<"message">> => <<"Tool not found">>}},
             send_response(Error);
         {_Description, Handler, _Schema} ->
             try
                 Result = Handler(Arguments),
                 ResultBinary = to_binary(Result),
                 logger:info("Tool execution result: ~s", [ResultBinary]),
-                Response = #{
-                    <<"jsonrpc">> => <<"2.0">>,
-                    <<"id">> => Id,
-                    <<"result">> => #{
-                        <<"content">> => [#{
-                            <<"type">> => <<"text">>,
-                            <<"text">> => ResultBinary
-                        }]
-                    }
-                },
+                Response =
+                    #{<<"jsonrpc">> => <<"2.0">>,
+                      <<"id">> => Id,
+                      <<"result">> =>
+                          #{<<"content">> =>
+                                [#{<<"type">> => <<"text">>, <<"text">> => ResultBinary}]}},
                 send_response(Response)
             catch
                 Class:Reason:Stack ->
                     logger:error("Tool handler crashed: ~p:~p~n~p", [Class, Reason, Stack]),
-                    Error = #{
-                        <<"jsonrpc">> => <<"2.0">>,
-                        <<"id">> => Id,
-                        <<"error">> => #{
-                            <<"code">> => -32603,
-                            <<"message">> => <<"Internal error">>
-                        }
-                    },
+                    Error =
+                        #{<<"jsonrpc">> => <<"2.0">>,
+                          <<"id">> => Id,
+                          <<"error">> =>
+                              #{<<"code">> => -32603, <<"message">> => <<"Internal error">>}},
                     send_response(Error)
             end
     end;
 handle_tool_call(Id, Params, _State) ->
     logger:warning("Invalid tool call parameters: ~p", [Params]),
-    Error = #{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"id">> => Id,
-        <<"error">> => #{
-            <<"code">> => -32602,
-            <<"message">> => <<"Invalid parameters">>
-        }
-    },
+    Error =
+        #{<<"jsonrpc">> => <<"2.0">>,
+          <<"id">> => Id,
+          <<"error">> => #{<<"code">> => -32602, <<"message">> => <<"Invalid parameters">>}},
     send_response(Error).
 
 -spec handle_resource_read(term(), map(), state()) -> ok.
@@ -432,14 +402,11 @@ handle_resource_read(Id, #{<<"uri">> := Uri}, State) ->
     case maps:get(Uri, State#state.resources, undefined) of
         undefined ->
             logger:warning("Resource not found: ~s", [Uri]),
-            Error = #{
-                <<"jsonrpc">> => <<"2.0">>,
-                <<"id">> => Id,
-                <<"error">> => #{
-                    <<"code">> => -32602,
-                    <<"message">> => <<"Resource not found">>
-                }
-            },
+            Error =
+                #{<<"jsonrpc">> => <<"2.0">>,
+                  <<"id">> => Id,
+                  <<"error">> =>
+                      #{<<"code">> => -32602, <<"message">> => <<"Resource not found">>}},
             send_response(Error);
         {_Description, Handler} ->
             handle_resource_with_handler(Id, Uri, Handler, <<"text/plain">>);
@@ -448,14 +415,10 @@ handle_resource_read(Id, #{<<"uri">> := Uri}, State) ->
     end;
 handle_resource_read(Id, Params, _State) ->
     logger:warning("Invalid resource read parameters: ~p", [Params]),
-    Error = #{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"id">> => Id,
-        <<"error">> => #{
-            <<"code">> => -32602,
-            <<"message">> => <<"Invalid parameters">>
-        }
-    },
+    Error =
+        #{<<"jsonrpc">> => <<"2.0">>,
+          <<"id">> => Id,
+          <<"error">> => #{<<"code">> => -32602, <<"message">> => <<"Invalid parameters">>}},
     send_response(Error).
 
 -spec handle_resource_with_handler(term(), binary(), fun(), binary()) -> ok.
@@ -464,29 +427,22 @@ handle_resource_with_handler(Id, Uri, Handler, MimeType) ->
         Content = Handler(Uri),
         ContentBinary = to_binary(Content),
         logger:info("Resource content generated for ~s: ~s", [Uri, ContentBinary]),
-        Response = #{
-            <<"jsonrpc">> => <<"2.0">>,
-            <<"id">> => Id,
-            <<"result">> => #{
-                <<"contents">> => [#{
-                    <<"uri">> => Uri,
-                    <<"mimeType">> => MimeType,
-                    <<"text">> => ContentBinary
-                }]
-            }
-        },
+        Response =
+            #{<<"jsonrpc">> => <<"2.0">>,
+              <<"id">> => Id,
+              <<"result">> =>
+                  #{<<"contents">> =>
+                        [#{<<"uri">> => Uri,
+                           <<"mimeType">> => MimeType,
+                           <<"text">> => ContentBinary}]}},
         send_response(Response)
     catch
         Class:Reason:Stack ->
             logger:error("Resource handler crashed: ~p:~p~n~p", [Class, Reason, Stack]),
-            Error = #{
-                <<"jsonrpc">> => <<"2.0">>,
-                <<"id">> => Id,
-                <<"error">> => #{
-                    <<"code">> => -32603,
-                    <<"message">> => <<"Internal error">>
-                }
-            },
+            Error =
+                #{<<"jsonrpc">> => <<"2.0">>,
+                  <<"id">> => Id,
+                  <<"error">> => #{<<"code">> => -32603, <<"message">> => <<"Internal error">>}},
             send_response(Error)
     end.
 
@@ -496,14 +452,10 @@ handle_prompt_get(Id, #{<<"name">> := Name} = Params, State) ->
     case maps:get(Name, State#state.prompts, undefined) of
         undefined ->
             logger:warning("Prompt not found: ~s", [Name]),
-            Error = #{
-                <<"jsonrpc">> => <<"2.0">>,
-                <<"id">> => Id,
-                <<"error">> => #{
-                    <<"code">> => -32602,
-                    <<"message">> => <<"Prompt not found">>
-                }
-            },
+            Error =
+                #{<<"jsonrpc">> => <<"2.0">>,
+                  <<"id">> => Id,
+                  <<"error">> => #{<<"code">> => -32602, <<"message">> => <<"Prompt not found">>}},
             send_response(Error);
         {_Description, Handler, _Arguments} ->
             try
@@ -511,38 +463,28 @@ handle_prompt_get(Id, #{<<"name">> := Name} = Params, State) ->
                 Result = Handler(Arguments),
                 Messages = normalize_prompt_result(Result),
                 logger:info("Prompt result generated for ~s", [Name]),
-                Response = #{
-                    <<"jsonrpc">> => <<"2.0">>,
-                    <<"id">> => Id,
-                    <<"result">> => #{
-                        <<"messages">> => Messages
-                    }
-                },
+                Response =
+                    #{<<"jsonrpc">> => <<"2.0">>,
+                      <<"id">> => Id,
+                      <<"result">> => #{<<"messages">> => Messages}},
                 send_response(Response)
             catch
                 Class:Reason:Stack ->
                     logger:error("Prompt handler crashed: ~p:~p~n~p", [Class, Reason, Stack]),
-                    Error = #{
-                        <<"jsonrpc">> => <<"2.0">>,
-                        <<"id">> => Id,
-                        <<"error">> => #{
-                            <<"code">> => -32603,
-                            <<"message">> => <<"Internal error">>
-                        }
-                    },
+                    Error =
+                        #{<<"jsonrpc">> => <<"2.0">>,
+                          <<"id">> => Id,
+                          <<"error">> =>
+                              #{<<"code">> => -32603, <<"message">> => <<"Internal error">>}},
                     send_response(Error)
             end
     end;
 handle_prompt_get(Id, Params, _State) ->
     logger:warning("Invalid prompt get parameters: ~p", [Params]),
-    Error = #{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"id">> => Id,
-        <<"error">> => #{
-            <<"code">> => -32602,
-            <<"message">> => <<"Invalid parameters">>
-        }
-    },
+    Error =
+        #{<<"jsonrpc">> => <<"2.0">>,
+          <<"id">> => Id,
+          <<"error">> => #{<<"code">> => -32602, <<"message">> => <<"Invalid parameters">>}},
     send_response(Error).
 
 %%====================================================================
@@ -558,26 +500,29 @@ send_response(Response) ->
     ok.
 
 -spec to_binary(term()) -> binary().
-to_binary(B) when is_binary(B) -> B;
-to_binary(L) when is_list(L) -> iolist_to_binary(L);
-to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
-to_binary(I) when is_integer(I) -> integer_to_binary(I);
-to_binary(F) when is_float(F) -> float_to_binary(F, [{decimals, 2}]);
-to_binary(Other) -> iolist_to_binary(io_lib:format("~p", [Other])).
+to_binary(B) when is_binary(B) ->
+    B;
+to_binary(L) when is_list(L) ->
+    iolist_to_binary(L);
+to_binary(A) when is_atom(A) ->
+    atom_to_binary(A, utf8);
+to_binary(I) when is_integer(I) ->
+    integer_to_binary(I);
+to_binary(F) when is_float(F) ->
+    float_to_binary(F, [{decimals, 2}]);
+to_binary(Other) ->
+    iolist_to_binary(io_lib:format("~p", [Other])).
 
 -spec normalize_prompt_result(term()) -> [map()].
 normalize_prompt_result(Result) when is_binary(Result) ->
-    [#{
-        <<"role">> => <<"user">>,
-        <<"content">> => #{
-            <<"type">> => <<"text">>,
-            <<"text">> => Result
-        }
-    }];
+    [#{<<"role">> => <<"user">>,
+       <<"content">> => #{<<"type">> => <<"text">>, <<"text">> => Result}}];
 normalize_prompt_result(Result) when is_list(Result) ->
     case Result of
-        [#{} | _] -> Result;  % Already a list of message maps
-        _ -> normalize_prompt_result(iolist_to_binary(Result))
+        [#{} | _] ->
+            Result;  % Already a list of message maps
+        _ ->
+            normalize_prompt_result(iolist_to_binary(Result))
     end;
 normalize_prompt_result(Result) ->
     normalize_prompt_result(to_binary(Result)).

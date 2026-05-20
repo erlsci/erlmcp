@@ -2,13 +2,8 @@
 -module(erlmcp_stdio).
 
 %% API exports
--export([
-    start/0, start/1, stop/0,
-    add_tool/3, add_tool/4,
-    add_resource/3, add_resource/4,
-    add_prompt/3, add_prompt/4,
-    is_running/0
-]).
+-export([start/0, start/1, stop/0, add_tool/3, add_tool/4, add_resource/3, add_resource/4,
+         add_prompt/3, add_prompt/4, is_running/0]).
 
 %%====================================================================
 %% API Functions
@@ -21,9 +16,12 @@ start() ->
 -spec start(map()) -> ok | {error, term()}.
 start(Options) ->
     case erlmcp_sup:start_stdio_server(Options) of
-        {ok, _Pid} -> ok;
-        {error, {already_started, _Pid}} -> ok;
-        Error -> Error
+        {ok, _Pid} ->
+            ok;
+        {error, {already_started, _Pid}} ->
+            ok;
+        Error ->
+            Error
     end.
 
 -spec stop() -> ok.
@@ -59,7 +57,8 @@ add_resource(Uri, Description, Handler, MimeType) ->
     case is_running() of
         true ->
             try
-                gen_server:call(erlmcp_stdio_server, {add_resource, Uri, Description, Handler, MimeType})
+                gen_server:call(erlmcp_stdio_server,
+                                {add_resource, Uri, Description, Handler, MimeType})
             catch
                 exit:{noproc, _} ->
                     {error, stdio_server_not_running};
@@ -79,7 +78,8 @@ add_prompt(Name, Description, Handler, Arguments) ->
     case is_running() of
         true ->
             try
-                gen_server:call(erlmcp_stdio_server, {add_prompt, Name, Description, Handler, Arguments})
+                gen_server:call(erlmcp_stdio_server,
+                                {add_prompt, Name, Description, Handler, Arguments})
             catch
                 exit:{noproc, _} ->
                     {error, stdio_server_not_running};
@@ -93,6 +93,8 @@ add_prompt(Name, Description, Handler, Arguments) ->
 -spec is_running() -> boolean().
 is_running() ->
     case whereis(erlmcp_stdio_server) of
-        undefined -> false;
-        Pid when is_pid(Pid) -> is_process_alive(Pid)
+        undefined ->
+            false;
+        Pid when is_pid(Pid) ->
+            is_process_alive(Pid)
     end.

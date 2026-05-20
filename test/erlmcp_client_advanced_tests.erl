@@ -1,20 +1,20 @@
 -module(erlmcp_client_advanced_tests).
+
 -include_lib("eunit/include/eunit.hrl").
+
 -include("erlmcp.hrl").
 
 client_advanced_test_() ->
     {setup,
      fun setup/0,
      fun cleanup/1,
-     [
-         {"Batch request processing", fun test_batch_requests/0},
-         {"Resource subscriptions", fun test_resource_subscriptions/0},
-         {"Notification handlers", fun test_notification_handlers/0},
-         {"Sampling handlers", fun test_sampling_handlers/0},
-         {"Strict mode validation", fun test_strict_mode/0},
-         {"Enhanced error handling", fun test_enhanced_error_handling/0},
-         {"Resource templates", fun test_resource_templates/0}
-     ]}.
+     [{"Batch request processing", fun test_batch_requests/0},
+      {"Resource subscriptions", fun test_resource_subscriptions/0},
+      {"Notification handlers", fun test_notification_handlers/0},
+      {"Sampling handlers", fun test_sampling_handlers/0},
+      {"Strict mode validation", fun test_strict_mode/0},
+      {"Enhanced error handling", fun test_enhanced_error_handling/0},
+      {"Resource templates", fun test_resource_templates/0}]}.
 
 setup() ->
     TransportOpts = {stdio, []},
@@ -36,9 +36,7 @@ test_resource_subscriptions() ->
 test_notification_handlers() ->
     Client = setup(),
     try
-        Handler = fun(Method, Params) ->
-            io:format("Notification: ~p ~p~n", [Method, Params])
-        end,
+        Handler = fun(Method, Params) -> io:format("Notification: ~p ~p~n", [Method, Params]) end,
         ok = erlmcp_client:set_notification_handler(Client, <<"test/notification">>, Handler),
         ok = erlmcp_client:remove_notification_handler(Client, <<"test/notification">>)
     after
@@ -48,9 +46,8 @@ test_notification_handlers() ->
 test_sampling_handlers() ->
     Client = setup(),
     try
-        Handler = fun(Method, Params) ->
-            io:format("Sampling request: ~p ~p~n", [Method, Params])
-        end,
+        Handler =
+            fun(Method, Params) -> io:format("Sampling request: ~p ~p~n", [Method, Params]) end,
         ok = erlmcp_client:set_sampling_handler(Client, Handler),
         ok = erlmcp_client:remove_sampling_handler(Client)
     after

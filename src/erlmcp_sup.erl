@@ -1,12 +1,9 @@
 -module(erlmcp_sup).
+
 -behaviour(supervisor).
 
--export([
-    start_link/0,
-    start_server/2, stop_server/1,
-    start_transport/3, stop_transport/1,
-    start_stdio_server/0, start_stdio_server/1, stop_stdio_server/0
-]).
+-export([start_link/0, start_server/2, stop_server/1, start_transport/3, stop_transport/1,
+         start_stdio_server/0, start_stdio_server/1, stop_stdio_server/0]).
 -export([init/1]).
 
 -include("erlmcp.hrl").
@@ -92,43 +89,33 @@ stop_stdio_server() ->
 
 -spec init([]) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
-    SupFlags = #{
-        strategy => one_for_all,  % If registry fails, restart everything
-        intensity => 3,
-        period => 60
-    },
+    SupFlags =
+        #{strategy => one_for_all,  % If registry fails, restart everything
+          intensity => 3,
+          period => 60},
 
     % Core infrastructure components
-    ChildSpecs = [
-        % Registry - central message router
-        #{
-            id => erlmcp_registry,
-            start => {erlmcp_registry, start_link, []},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [erlmcp_registry]
-        },
-
-        % Server supervisor - manages server instances
-        #{
-            id => erlmcp_server_sup,
-            start => {erlmcp_server_sup, start_link, []},
-            restart => permanent,
-            shutdown => infinity,
-            type => supervisor,
-            modules => [erlmcp_server_sup]
-        },
-
-        % Transport supervisor - manages transport instances
-        #{
-            id => erlmcp_transport_sup,
-            start => {erlmcp_transport_sup, start_link, []},
-            restart => permanent,
-            shutdown => infinity,
-            type => supervisor,
-            modules => [erlmcp_transport_sup]
-        }
-    ],
+    ChildSpecs =
+        [% Registry - central message router
+         #{id => erlmcp_registry,
+           start => {erlmcp_registry, start_link, []},
+           restart => permanent,
+           shutdown => 5000,
+           type => worker,
+           modules => [erlmcp_registry]},
+         % Server supervisor - manages server instances
+         #{id => erlmcp_server_sup,
+           start => {erlmcp_server_sup, start_link, []},
+           restart => permanent,
+           shutdown => infinity,
+           type => supervisor,
+           modules => [erlmcp_server_sup]},
+         % Transport supervisor - manages transport instances
+         #{id => erlmcp_transport_sup,
+           start => {erlmcp_transport_sup, start_link, []},
+           restart => permanent,
+           shutdown => infinity,
+           type => supervisor,
+           modules => [erlmcp_transport_sup]}],
 
     {ok, {SupFlags, ChildSpecs}}.

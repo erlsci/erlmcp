@@ -67,3 +67,7 @@ core.*
 
 # Lock files (keep rebar.lock)
 # rebar.lock
+
+# Local dev
+.claude
+/workbench

@@ -17,20 +17,20 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(erlmcp_transport_stdio).
+
 -behaviour(gen_server).
 
 %% API exports
 -export([send/2, start_link/1, close/1]).
-
 %% gen_server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
+         code_change/3]).
 
--record(state, {
-    owner :: pid(),
-    reader :: pid() | undefined,
-    buffer = <<>> :: binary(),
-    test_mode = false :: boolean()
-}).
+-record(state,
+        {owner :: pid(),
+         reader :: pid() | undefined,
+         buffer = <<>> :: binary(),
+         test_mode = false :: boolean()}).
 
 -type state() :: #state{}.
 
@@ -76,10 +76,7 @@ init([Owner]) ->
     % or checking if stdin is available
     TestMode = is_test_environment(),
 
-    State = #state{
-        owner = Owner,
-        test_mode = TestMode
-    },
+    State = #state{owner = Owner, test_mode = TestMode},
 
     % Only start the reader if we're not in test mode
     case TestMode of
@@ -94,12 +91,12 @@ init([Owner]) ->
 -spec handle_call(term(), {pid(), term()}, state()) -> {reply, term(), state()}.
 handle_call(get_state, _From, State) ->
     {reply, {ok, State}, State};
-
-handle_call({simulate_input, Line}, _From, #state{test_mode = true, owner = Owner} = State) ->
+handle_call({simulate_input, Line},
+            _From,
+            #state{test_mode = true, owner = Owner} = State) ->
     % Allow tests to simulate input
     Owner ! {transport_message, Line},
     {reply, ok, State};
-
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -111,7 +108,6 @@ handle_cast(_Msg, State) ->
 handle_info({line, Line}, #state{owner = Owner} = State) ->
     Owner ! {transport_message, Line},
     {noreply, State};
-
 handle_info({'EXIT', Pid, Reason}, #state{reader = Pid, test_mode = false} = State) ->
     case Reason of
         normal ->
@@ -123,10 +119,8 @@ handle_info({'EXIT', Pid, Reason}, #state{reader = Pid, test_mode = false} = Sta
             logger:error("Reader process died: ~p", [Reason]),
             {stop, {reader_died, Reason}, State}
     end;
-
 handle_info({'EXIT', Pid, Reason}, #state{owner = Pid} = State) ->
     {stop, {owner_died, Reason}, State};
-
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -149,15 +143,18 @@ code_change(_OldVsn, State, _Extra) ->
 is_test_environment() ->
     % Check various indicators that we're in a test environment
     case get(test_mode) of
-        true -> true;
+        true ->
+            true;
         _ ->
             % Check if EUnit is running
             case whereis(eunit_proc) of
                 undefined ->
                     % Check if we can read from stdin without blocking
                     case stdin_available() of
-                        true -> false;
-                        false -> true  % Assume test mode if stdin not available
+                        true ->
+                            false;
+                        false ->
+                            true  % Assume test mode if stdin not available
                     end;
                 _ ->
                     true  % EUnit is running
@@ -169,9 +166,12 @@ stdin_available() ->
     % Try to check if stdin is available without blocking
     % This is a heuristic - in a real application you might want more sophisticated detection
     case io:get_chars("", 0) of
-        eof -> false;
-        {error, _} -> false;
-        _ -> true
+        eof ->
+            false;
+        {error, _} ->
+            false;
+        _ ->
+            true
     end.
 
 %% Alternative approach - more concise:
@@ -195,8 +195,11 @@ read_loop(Parent, Owner) ->
 process_line(Parent, Line) ->
     CleanLine = trim_line(Line),
     case byte_size(CleanLine) of
-        0 -> ok;  %% Skip empty lines
-        _ -> Parent ! {line, CleanLine}, ok  %% Send and return ok
+        0 ->
+            ok;  %% Skip empty lines
+        _ ->
+            Parent ! {line, CleanLine},
+            ok  %% Send and return ok
     end.
 
 -spec trim_line(binary()) -> binary().
@@ -216,11 +219,11 @@ trim_end(<<>>) ->
 trim_end(Binary) ->
     Size = byte_size(Binary),
     case Binary of
-        <<Content:(Size-2)/binary, "\r\n">> ->
+        <<Content:(Size - 2)/binary, "\r\n">> ->
             trim_end(Content);
-        <<Content:(Size-1)/binary, "\n">> ->
+        <<Content:(Size - 1)/binary, "\n">> ->
             trim_end(Content);
-        <<Content:(Size-1)/binary, "\r">> ->
+        <<Content:(Size - 1)/binary, "\r">> ->
             trim_end(Content);
         _ ->
             Binary

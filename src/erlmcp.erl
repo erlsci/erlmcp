@@ -3,35 +3,20 @@
 -include("erlmcp.hrl").
 
 %% Application management API
--export([
-    start_server/1, start_server/2, stop_server/1, list_servers/0,
-    start_transport/2, start_transport/3, stop_transport/1, list_transports/0,
-    bind_transport_to_server/2, unbind_transport/1
-]).
-
+-export([start_server/1, start_server/2, stop_server/1, list_servers/0, start_transport/2,
+         start_transport/3, stop_transport/1, list_transports/0, bind_transport_to_server/2,
+         unbind_transport/1]).
 %% Server operations API
--export([
-    add_resource/3, add_resource/4,
-    add_tool/3, add_tool/4,
-    add_prompt/3, add_prompt/4
-]).
-
+-export([add_resource/3, add_resource/4, add_tool/3, add_tool/4, add_prompt/3,
+         add_prompt/4]).
 %% Configuration API
--export([
-    get_server_config/1, update_server_config/2,
-    get_transport_config/1, update_transport_config/2
-]).
-
+-export([get_server_config/1, update_server_config/2, get_transport_config/1,
+         update_transport_config/2]).
 %% Legacy compatibility for stdio server
--export([
-    start_stdio_server/0, start_stdio_server/1, stop_stdio_server/0
-]).
-
+-export([start_stdio_server/0, start_stdio_server/1, stop_stdio_server/0]).
 %% Convenience functions
--export([
-    start_stdio_setup/2, start_tcp_setup/3, 
-    setup_server_components/2, quick_stdio_server/3
-]).
+-export([start_stdio_setup/2, start_tcp_setup/3, setup_server_components/2,
+         quick_stdio_server/3]).
 
 %% Types
 -type server_id() :: atom().
@@ -51,31 +36,32 @@ start_server(ServerId) ->
 -spec start_server(server_id(), map()) -> {ok, pid()} | {error, term()}.
 start_server(ServerId, Config) ->
     % Ensure default capabilities if not provided
-    DefaultCaps = #mcp_server_capabilities{
-        resources = #mcp_capability{enabled = true},
-        tools = #mcp_capability{enabled = true},
-        prompts = #mcp_capability{enabled = true}
-    },
-    
+    DefaultCaps =
+        #mcp_server_capabilities{resources = #mcp_capability{enabled = true},
+                                 tools = #mcp_capability{enabled = true},
+                                 prompts = #mcp_capability{enabled = true}},
+
     % Merge with provided config
-    FinalConfig = case maps:get(capabilities, Config, undefined) of
-        undefined ->
-            Config#{capabilities => DefaultCaps};
-        _ ->
-            Config
-    end,
-    
+    FinalConfig =
+        case maps:get(capabilities, Config, undefined) of
+            undefined ->
+                Config#{capabilities => DefaultCaps};
+            _ ->
+                Config
+        end,
+
     % Start server using the refactored erlmcp_server
     case start_server_process(ServerId, FinalConfig) of
         {ok, ServerPid} ->
             % Register with registry if available
             case register_server_with_registry(ServerId, ServerPid, FinalConfig) of
-                ok -> 
+                ok ->
                     logger:info("Started and registered server ~p", [ServerId]),
                     {ok, ServerPid};
-                {error, Reason} -> 
+                {error, Reason} ->
                     % Registration failed, but server started - log warning and continue
-                    logger:warning("Server ~p started but registry registration failed: ~p", [ServerId, Reason]),
+                    logger:warning("Server ~p started but registry registration failed: ~p",
+                                   [ServerId, Reason]),
                     {ok, ServerPid}
             end;
         {error, _} = Error ->
@@ -95,11 +81,11 @@ stop_server(ServerId) ->
                 {ok, {ServerPid, _Config}} ->
                     erlmcp_registry:unregister_server(ServerId),
                     case is_process_alive(ServerPid) of
-                        true -> 
+                        true ->
                             erlmcp_server:stop(ServerPid),
                             logger:info("Stopped server ~p", [ServerId]),
                             ok;
-                        false -> 
+                        false ->
                             logger:info("Server ~p already stopped", [ServerId]),
                             ok
                     end;
@@ -112,10 +98,10 @@ stop_server(ServerId) ->
 -spec list_servers() -> [{server_id(), {pid(), map()}}].
 list_servers() ->
     case whereis(erlmcp_registry) of
-        undefined -> 
+        undefined ->
             logger:warning("Registry not available for listing servers"),
             [];
-        _ -> 
+        _ ->
             erlmcp_registry:list_servers()
     end.
 
@@ -123,22 +109,28 @@ list_servers() ->
 start_transport(TransportId, Type) ->
     start_transport(TransportId, Type, #{}).
 
--spec start_transport(transport_id(), transport_type(), map()) -> {ok, pid()} | {error, term()}.
+-spec start_transport(transport_id(), transport_type(), map()) ->
+                         {ok, pid()} | {error, term()}.
 start_transport(TransportId, Type, Config) ->
     case Type of
         stdio ->
             case erlmcp_transport_stdio_new:start_link(TransportId, Config) of
                 {ok, TransportPid} ->
                     TransportConfig = Config#{type => Type},
-                    case register_transport_with_registry(TransportId, TransportPid, TransportConfig) of
-                        ok -> 
+                    case register_transport_with_registry(TransportId,
+                                                          TransportPid,
+                                                          TransportConfig)
+                    of
+                        ok ->
                             logger:info("Started and registered transport ~p", [TransportId]),
                             {ok, TransportPid};
                         {error, Reason} ->
-                            logger:warning("Transport ~p started but registry registration failed: ~p", [TransportId, Reason]),
+                            logger:warning("Transport ~p started but registry registration failed: ~p",
+                                           [TransportId, Reason]),
                             {ok, TransportPid}
                     end;
-                Error -> Error
+                Error ->
+                    Error
             end;
         tcp ->
             {error, {transport_not_implemented, tcp}};
@@ -158,11 +150,12 @@ stop_transport(TransportId) ->
                 {ok, {TransportPid, _Config}} ->
                     erlmcp_registry:unregister_transport(TransportId),
                     case is_process_alive(TransportPid) of
-                        true -> 
+                        true ->
                             erlmcp_transport_stdio_new:close(TransportPid),
                             logger:info("Stopped transport ~p", [TransportId]),
                             ok;
-                        false -> ok
+                        false ->
+                            ok
                     end;
                 {error, not_found} ->
                     ok
@@ -172,8 +165,10 @@ stop_transport(TransportId) ->
 -spec list_transports() -> [{transport_id(), {pid(), map()}}].
 list_transports() ->
     case whereis(erlmcp_registry) of
-        undefined -> [];
-        _ -> erlmcp_registry:list_transports()
+        undefined ->
+            [];
+        _ ->
+            erlmcp_registry:list_transports()
     end.
 
 -spec bind_transport_to_server(transport_id(), server_id()) -> ok | {error, term()}.
@@ -363,7 +358,8 @@ stop_stdio_server() ->
 %%====================================================================
 
 %% Create a complete MCP server setup with stdio transport
--spec start_stdio_setup(server_id(), map()) -> {ok, #{server => pid(), transport => pid()}} | {error, term()}.
+-spec start_stdio_setup(server_id(), map()) ->
+                           {ok, #{server => pid(), transport => pid()}} | {error, term()}.
 start_stdio_setup(ServerId, Config) ->
     case start_server(ServerId, Config) of
         {ok, ServerPid} ->
@@ -376,7 +372,8 @@ start_stdio_setup(ServerId, Config) ->
                         ok ->
                             {ok, #{server => ServerPid, transport => TransportPid}};
                         {error, BindError} ->
-                            logger:warning("Server and transport started but binding failed: ~p", [BindError]),
+                            logger:warning("Server and transport started but binding failed: ~p",
+                                           [BindError]),
                             {ok, #{server => ServerPid, transport => TransportPid}}
                     end;
                 {error, TransportError} ->
@@ -388,7 +385,8 @@ start_stdio_setup(ServerId, Config) ->
     end.
 
 %% Create a complete MCP server setup with TCP transport
--spec start_tcp_setup(server_id(), map(), map()) -> {ok, #{server => pid(), transport => pid()}} | {error, term()}.
+-spec start_tcp_setup(server_id(), map(), map()) ->
+                         {ok, #{server => pid(), transport => pid()}} | {error, term()}.
 start_tcp_setup(ServerId, ServerConfig, TcpConfig) ->
     case start_server(ServerId, ServerConfig) of
         {ok, ServerPid} ->
@@ -400,7 +398,8 @@ start_tcp_setup(ServerId, ServerConfig, TcpConfig) ->
                         ok ->
                             {ok, #{server => ServerPid, transport => TransportPid}};
                         {error, BindError} ->
-                            logger:warning("Server and transport started but binding failed: ~p", [BindError]),
+                            logger:warning("Server and transport started but binding failed: ~p",
+                                           [BindError]),
                             {ok, #{server => ServerPid, transport => TransportPid}}
                     end;
                 {error, TransportError} ->
@@ -417,32 +416,32 @@ setup_server_components(ServerId, Components) ->
     Resources = maps:get(resources, Components, []),
     Tools = maps:get(tools, Components, []),
     Prompts = maps:get(prompts, Components, []),
-    
+
     try
         % Add resources
-        lists:foreach(fun
-            ({Uri, Handler}) ->
-                ok = add_resource(ServerId, Uri, Handler);
-            ({Uri, Handler, Options}) ->
-                ok = add_resource(ServerId, Uri, Handler, Options)
-        end, Resources),
-        
+        lists:foreach(fun ({Uri, Handler}) ->
+                              ok = add_resource(ServerId, Uri, Handler);
+                          ({Uri, Handler, Options}) ->
+                              ok = add_resource(ServerId, Uri, Handler, Options)
+                      end,
+                      Resources),
+
         % Add tools
-        lists:foreach(fun
-            ({Name, Handler}) ->
-                ok = add_tool(ServerId, Name, Handler);
-            ({Name, Handler, Options}) ->
-                ok = add_tool(ServerId, Name, Handler, Options)
-        end, Tools),
-        
+        lists:foreach(fun ({Name, Handler}) ->
+                              ok = add_tool(ServerId, Name, Handler);
+                          ({Name, Handler, Options}) ->
+                              ok = add_tool(ServerId, Name, Handler, Options)
+                      end,
+                      Tools),
+
         % Add prompts
-        lists:foreach(fun
-            ({Name, Handler}) ->
-                ok = add_prompt(ServerId, Name, Handler);
-            ({Name, Handler, Options}) ->
-                ok = add_prompt(ServerId, Name, Handler, Options)
-        end, Prompts),
-        
+        lists:foreach(fun ({Name, Handler}) ->
+                              ok = add_prompt(ServerId, Name, Handler);
+                          ({Name, Handler, Options}) ->
+                              ok = add_prompt(ServerId, Name, Handler, Options)
+                      end,
+                      Prompts),
+
         ok
     catch
         error:{badmatch, {error, Reason}} ->
@@ -452,7 +451,8 @@ setup_server_components(ServerId, Components) ->
     end.
 
 %% Quick way to create a complete stdio MCP server with components
--spec quick_stdio_server(server_id(), map(), map()) -> {ok, #{server => pid(), transport => pid()}} | {error, term()}.
+-spec quick_stdio_server(server_id(), map(), map()) ->
+                            {ok, #{server => pid(), transport => pid()}} | {error, term()}.
 quick_stdio_server(ServerId, ServerConfig, Components) ->
     case start_stdio_setup(ServerId, ServerConfig) of
         {ok, Result} ->
@@ -489,19 +489,20 @@ start_server_process(ServerId, Config) ->
 -spec register_server_with_registry(server_id(), pid(), map()) -> ok | {error, term()}.
 register_server_with_registry(ServerId, ServerPid, Config) ->
     case whereis(erlmcp_registry) of
-        undefined -> 
+        undefined ->
             % Registry not available - this is OK for some deployments
             ok;
-        _ -> 
+        _ ->
             erlmcp_registry:register_server(ServerId, ServerPid, Config)
     end.
 
--spec register_transport_with_registry(transport_id(), pid(), map()) -> ok | {error, term()}.
+-spec register_transport_with_registry(transport_id(), pid(), map()) ->
+                                          ok | {error, term()}.
 register_transport_with_registry(TransportId, TransportPid, Config) ->
     case whereis(erlmcp_registry) of
-        undefined -> 
+        undefined ->
             ok; % Registry not available - this is OK
-        _ -> 
+        _ ->
             erlmcp_registry:register_transport(TransportId, TransportPid, Config)
     end.
 
@@ -522,9 +523,9 @@ find_server_process(ServerId) ->
 
 -spec is_new_architecture_available() -> boolean().
 is_new_architecture_available() ->
-    whereis(erlmcp_registry) =/= undefined andalso
-    whereis(erlmcp_server_sup) =/= undefined andalso
-    whereis(erlmcp_transport_sup) =/= undefined.
+    whereis(erlmcp_registry) =/= undefined
+    andalso whereis(erlmcp_server_sup) =/= undefined
+    andalso whereis(erlmcp_transport_sup) =/= undefined.
 
 -spec create_transport_id(server_id(), binary()) -> transport_id().
 create_transport_id(ServerId, Type) ->
@@ -540,34 +541,40 @@ start_legacy_stdio_server(Options) ->
         {ok, ServerPid} ->
             % Register as default stdio server if registry is available
             case whereis(erlmcp_registry) of
-                undefined -> 
+                undefined ->
                     {ok, ServerPid};
                 _ ->
-                    ServerConfig = #{
-                        capabilities => #mcp_server_capabilities{
-                            resources = #mcp_capability{enabled = true},
-                            tools = #mcp_capability{enabled = true},
-                            prompts = #mcp_capability{enabled = true}
-                        },
-                        options => Options,
-                        legacy => true
-                    },
-                    case erlmcp_registry:register_server(default_stdio_server, ServerPid, ServerConfig) of
-                        ok -> {ok, ServerPid};
-                        {error, already_registered} -> {ok, ServerPid};
-                        {error, Reason} -> 
-                            logger:warning("Legacy server started but registration failed: ~p", [Reason]),
+                    ServerConfig =
+                        #{capabilities =>
+                              #mcp_server_capabilities{resources = #mcp_capability{enabled = true},
+                                                       tools = #mcp_capability{enabled = true},
+                                                       prompts = #mcp_capability{enabled = true}},
+                          options => Options,
+                          legacy => true},
+                    case erlmcp_registry:register_server(default_stdio_server,
+                                                         ServerPid,
+                                                         ServerConfig)
+                    of
+                        ok ->
+                            {ok, ServerPid};
+                        {error, already_registered} ->
+                            {ok, ServerPid};
+                        {error, Reason} ->
+                            logger:warning("Legacy server started but registration failed: ~p",
+                                           [Reason]),
                             {ok, ServerPid}
                     end
             end;
-        Error -> Error
+        Error ->
+            Error
     end.
 
 -spec stop_legacy_stdio_server() -> ok.
 stop_legacy_stdio_server() ->
     case whereis(erlmcp_stdio_server) of
-        undefined -> ok;
-        _Pid -> 
+        undefined ->
+            ok;
+        _Pid ->
             erlmcp_stdio_server:stop(),
             ok
     end.
