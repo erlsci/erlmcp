@@ -2,7 +2,7 @@
 
 [![Build Status][gh-actions-badge]][gh-actions]
 
-[![Project Logo][logo]][logo]
+[![Project Logo][logo]][logo-large]
 
 *Erlang implementation of the Model Context Protocol (MCP) SDK.*
 
@@ -98,5 +98,6 @@ Apache 2.0
 [//]: ---Named-Links---
 
 [logo]: priv/images/logo.png
+[logo-large]: priv/images/logo-large.png
 [gh-actions-badge]: https://github.com/erlsci/erlmcp/workflows/ci/badge.svg
 [gh-actions]: https://github.com/erlsci/erlmcp/actions?query=workflow%3Aci
