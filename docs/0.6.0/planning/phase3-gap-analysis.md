@@ -93,7 +93,7 @@ Structural decisions that differ from the Phase 2 design and need realignment.
 | **No per-request process model** | **P0** | The single biggest one. Without it there is no clean cancellation, no fault isolation, and head-of-line blocking on slow tools. Everything in §2 P0 leans on this. |
 | **Session is not a `gen_statem`** | **P0** | Lifecycle/negotiation is a state machine; modeling it as ad-hoc `gen_server` state is why version negotiation/ping/lifecycle gaps are awkward to add. |
 | **Registry on the message hot path** | P1 | Central `erlmcp_registry` routes every message — a SPOF/bottleneck. Demote to discovery/binding only. |
-| **Transport behaviour is inconsistent / partly broken** | **P0** | `erlmcp_transport_http:send/2` does `gen_server:call(self(), ...)` (deadlock); transport modules implement the behaviour inconsistently. Needs one clean `erlmcp_transport` behaviour. |
+| **Transport behaviour is inconsistent / partly broken** | **P1** (was P0) | UPDATE 2026-05-20: the `erlmcp_transport_http:send/2` `gen_server:call(self(),...)` deadlock is **fixed** (Issue #4, commit 57e2f50) — http is now a pid-based gen_server that delivers responses directly to its `owner`, off the registry. Remaining work: stdio/tcp still implement the behaviour inconsistently; M4 standardizes them **to match http** (the new reference pattern), not the other way. |
 | **Client/server asymmetry** | P1 | Server is (partially) built out; the client lacks roots/elicitation/full sampling handlers. The ideal design is symmetric via client callback behaviours. |
 
 ---

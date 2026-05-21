@@ -140,6 +140,14 @@ conformance client score ≥ rmcp's reference.
   the July-2025 prior art (see `phase5-prior-art-reconciliation.md` §5 and Phase 2 §6).
   The only change: transports deliver to/receive from the **bound session directly**,
   not via registry hot-path routing.
+- **Baseline as of 2026-05-20 — http is the reference pattern.** Issue #4 (the
+  `gen_server:call(self(),...)` deadlock) is fixed in commit 57e2f50: `erlmcp_transport_http`
+  is now a real gen_server started via `start_link(Opts#{owner => self()})`, with
+  `send/2` messaging the transport Pid and responses delivered `Owner ! {transport_message, _}`
+  — i.e. **already pid-based and already off the registry hot path**. M4's job is to bring
+  `erlmcp_transport_stdio` and `_tcp` up to this same shape (pid-based, owner/session-direct
+  delivery), **not** to revert http. Its meck-mocked test suite (`erlmcp_transport_http_tests.erl`)
+  is the template for the per-transport suites.
 
 Closes: C (transport behaviour fully realized). DoD: the same example server runs
 unchanged over stdio, TCP, and streamable HTTP; transport conformance scenarios pass.
