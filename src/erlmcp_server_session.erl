@@ -32,7 +32,6 @@ send_message(Session, Data) when is_pid(Session), is_binary(Data) ->
 %% gen_statem callbacks
 %%====================================================================
 
--spec callback_mode() -> [gen_statem:callback_mode()].
 callback_mode() ->
     [state_functions].
 
@@ -182,7 +181,7 @@ handle_request(Id, Method, Params, Data) ->
     }),
     {Pid, Ref} = spawn_monitor(fun() ->
         Result = dispatch_request(Method, Params, Handlers, Ctx),
-        Session ! {worker_result, Id, Result}
+        _ = Session ! {worker_result, Id, Result}
     end),
     NewPending = maps:put(Id, {Pid, Ref}, Data#data.pending),
     {keep_state, Data#data{pending = NewPending}}.
@@ -261,13 +260,15 @@ dispatch_request(Method, Params, Handlers, _Ctx) ->
 
 send_response(#data{transport = Transport}, Id, Result) when is_pid(Transport) ->
     Json = erlmcp_json_rpc:encode_response(Id, Result),
-    Transport ! {send, Json};
+    Transport ! {send, Json},
+    ok;
 send_response(_, _, _) ->
     ok.
 
 send_error(#data{transport = Transport}, Id, Code, Message) when is_pid(Transport) ->
     Json = erlmcp_json_rpc:encode_error_response(Id, Code, Message),
-    Transport ! {send, Json};
+    Transport ! {send, Json},
+    ok;
 send_error(_, _, _, _) ->
     ok.
 

@@ -48,6 +48,6 @@ report_progress(#{session := Session, request_id := ReqId} = Ctx, Fraction, Msg)
             },
             Notification = erlmcp_json_rpc:encode_notification(
                                <<"notifications/progress">>, Params),
-            Session ! {send_notification, ReqId, Notification},
+            _ = Session ! {send_notification, ReqId, Notification},
             ok
     end.

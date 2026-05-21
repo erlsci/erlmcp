@@ -106,7 +106,7 @@ operational(cast, {cancel, RequestId}, Data) ->
     Notification = erlmcp_json_rpc:encode_notification(
                        <<"notifications/cancelled">>,
                        #{<<"requestId">> => RequestId}),
-    Data#data.transport ! {send, Notification},
+    _ = Data#data.transport ! {send, Notification},
     keep_state_and_data;
 
 operational(cast, {transport_data, RawData}, Data) ->
@@ -143,7 +143,7 @@ handle_init_response(Id, Result, Data) ->
             },
             Initialized = erlmcp_json_rpc:encode_notification(
                               <<"notifications/initialized">>, #{}),
-            NewData#data.transport ! {send, Initialized},
+            _ = NewData#data.transport ! {send, Initialized},
             {next_state, operational, NewData,
              [{reply, From, {ok, Result}}]};
         _ ->
@@ -184,5 +184,5 @@ next_id(#data{next_id = Id} = Data) ->
 
 send_request(#data{transport = Transport}, Id, Method, Params) ->
     Json = erlmcp_json_rpc:encode_request(Id, Method, Params),
-    Transport ! {send, Json},
+    _ = Transport ! {send, Json},
     ok.
