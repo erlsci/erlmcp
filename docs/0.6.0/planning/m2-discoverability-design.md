@@ -173,7 +173,7 @@ The acceptance criteria for this design — **DISC-1 … DISC-9** — live as th
 canonical, operational ledger (the place where `Status`/`Evidence` are updated
 during implementation, in `LEDGER_DISCIPLINE.md` column format) at:
 
-> `../milestones/M2-server-feature-surface-ledger.md`
+> `../milestones/M2a-tools-ergonomics-discoverability-ledger.md`
 
 They are kept there rather than duplicated here so the two can't drift — the same
 single-source-of-truth discipline this design applies to tool metadata (§3). This

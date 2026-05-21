@@ -98,10 +98,10 @@ OTP texts" bar).
 
 ## Working protocol
 
-- **Branch:** `task/0.6.0-m0`, cut from the `release/0.6.0` integration branch.
+- **Branch:** `task/0.6.0-m0`, cut from the `release/0.6.x` integration branch.
   (CI's `on:` triggers fire for `main`, `release/**`, `task/**`, `feature/**`,
   `epic/**`, and tags — a bare `0.6.0-m0` matches none, so milestone branches MUST
-  use the `task/` prefix. Open a PR into `release/0.6.0` to run CI and for CDC review.)
+  use the `task/` prefix. Open a PR into `release/0.6.x` to run CI and for CDC review.)
 - **Commit per ledger row** (or per coherent group). In the *same* commit that
   closes a row, update that row's `Status` → `done` and fill `Evidence` (commit
   SHA + the Verify command's output).

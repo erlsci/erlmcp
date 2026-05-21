@@ -100,6 +100,14 @@ server in the same VM complete initialize→ping→cancel; PropEr model of the e
 ### M2 — Server feature surface · **P0/P1**
 *Goal: a server that passes the bulk of the conformance server scenarios.*
 
+**Split into M2a + M2b** (2026-05-21): the original single M2 spanned ~four
+rmcp-quality feature areas — too large for the 5-iteration cap. Tools-first is
+dependency-sound (resources/prompts reuse the same schema/validation/`list_changed`/
+pagination patterns, and discoverability rides on the `add_tool/2` map).
+
+#### M2a — Tools, ergonomics & discoverability
+*Ledger: `milestones/M2a-tools-ergonomics-discoverability-ledger.md`.*
+
 - **Tools:** `tools/list`, `tools/call`, **input-schema validation** (jesse),
   **output schema + structured content**, content types (text/image/audio/embedded
   resource/resource link), annotations, runtime add/remove → automatic
@@ -111,27 +119,34 @@ server in the same VM complete initialize→ping→cancel; PropEr model of the e
   (`when_to_use`/`next`/`category`/`returns`/`summary`) as optional keys on the
   `add_tool/2` map, derived into three surfaces — `InitializeResult.instructions`
   (strategy/categories/entry points only), per-tool `_meta` in `tools/list`
-  (reverse-DNS namespace `io.erlmcp/`), and a generated **directory tool**. Behavioral hints go
-  in protocol `annotations`. The registration map is the single source of truth; all
-  surfaces are derived so they cannot drift (the failure mode that left 32/51 tools
-  ungoverned in the Fabryk reference server). The directory tool is an explicit
-  non-protocol extension (excluded from the M5 scorecard; see M5).
+  (reverse-DNS namespace `io.erlmcp/`), and a generated **directory tool**. Behavioral
+  hints go in protocol `annotations`. The registration map is the single source of
+  truth; all surfaces are derived so they cannot drift (the failure mode that left
+  32/51 tools ungoverned in the Fabryk reference server). The directory tool is an
+  explicit non-protocol extension (excluded from the M5 scorecard; see M5).
+- **Progress** via `erlmcp_ctx` from inside tool workers.
+
+DoD: a calculator-style example exercises the tool surface end-to-end; **DISC-1…DISC-9
+closed** (`m2-discoverability-design.md` §9) — 100% tool metadata coverage, a
+dangling-free and orphan-free `next` graph, all surfaces derived from one source;
+Dialyzer clean; CI green.
+
+#### M2b — Resources, prompts, logging, completion & conformance
+*Ledger: `milestones/M2b-resources-prompts-logging-completion-ledger.md`. Depends on M2a.*
+
 - **Resources:** list/read, **templates**, subscribe/unsubscribe, `updated` +
   `list_changed`.
 - **Prompts:** list/get + `list_changed`.
 - **Logging** (`setLevel` + `notifications/message`) — make the advertised
   capability real.
 - **Completion** (`completion/complete`).
-- **Pagination** (cursor/nextCursor) across all list endpoints.
-- **Progress** via `erlmcp_ctx` from inside workers.
+- **Pagination** (cursor/nextCursor) across the resources/prompts list endpoints.
 
 Closes: A (output schema/validation, completion, logging, pagination, structured
 content, templates); B (god-module, records→opaque, boolean-param cleanup as these
-APIs are written). DoD: a non-trivial example server (rebuild the weather/calculator
-examples on the new core) exercises every server capability; conformance server
-score ≥ rmcp's reference; **discoverability invariants DISC-1…DISC-9 closed**
-(`m2-discoverability-design.md` §9) — in particular 100% tool metadata coverage, a
-dangling-free and orphan-free `next` graph, and all surfaces derived from one source.
+APIs are written). DoD: a resource/prompt example exercises those capabilities;
+**conformance server score ≥ rmcp's reference** (the harness's server scenarios land
+here; the formal scorecard is M5).
 
 ### M3 — Client + server→client features · **P1**
 *Goal: a symmetric client; the inverted-direction features work.*

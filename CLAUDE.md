@@ -77,8 +77,8 @@ what is not done, and distinguish "verified by running X" from "I believe X".
 
 ## Branches & CI
 
-- Integration branch for the re-core: **`release/0.6.0`** (`main` stays on 0.5.x).
-- Milestone branches: **`task/0.6.0-mN`**, cut from `release/0.6.0`, PR'd back into it.
+- Integration branch for the re-core: **`release/0.6.x`** (`main` stays on 0.5.x).
+- Milestone branches: **`task/0.6.0-mN`**, cut from `release/0.6.x`, PR'd back into it.
 - CI (`.github/workflows/ci.yml`) fires on `main`, `release/**`, `task/**`,
   `feature/**`, `epic/**`, and tags — **not** a bare `0.6.0-mN`, so use the `task/`
   prefix. CI is the independent reproducer for compile/xref/eunit/CT/PropEr/

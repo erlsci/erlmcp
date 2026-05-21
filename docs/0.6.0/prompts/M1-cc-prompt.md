@@ -100,7 +100,7 @@ milestone; it supersedes the interim "Inaka + OTP texts" bar (the
 
 ## Working protocol
 
-- **Branch:** `task/0.6.0-m1`, cut from `release/0.6.0`; PR into `release/0.6.0`.
+- **Branch:** `task/0.6.0-m1`, cut from `release/0.6.x`; PR into `release/0.6.x`.
   (CI fires on `task/**` and `release/**`; a bare `0.6.0-m1` does not.)
 - **Commit per ledger row** (or coherent group); in the same commit update that
   row's `Status`/`Evidence` (commit SHA + Verify output).
