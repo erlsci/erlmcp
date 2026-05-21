@@ -68,14 +68,8 @@ start_stdio_server() ->
     start_stdio_server(#{}).
 
 -spec start_stdio_server(map()) -> {ok, pid()} | {error, term()}.
-start_stdio_server(Options) ->
-    % Use the legacy stdio server for now until full implementation
-    case erlmcp_stdio_server:start_link(Options) of
-        {ok, ServerPid} ->
-            {ok, ServerPid};
-        Error ->
-            Error
-    end.
+start_stdio_server(_Options) ->
+    {error, removed}.
 
 -spec stop_stdio_server() -> ok.
 stop_stdio_server() ->

@@ -13,7 +13,6 @@ registry_test_() ->
      {"Server registration and lookup", fun test_server_registration/0},
      {"Transport registration and lookup", fun test_transport_registration/0},
      {"Server-Transport binding", fun test_binding/0},
-     {"Message routing", fun test_message_routing/0},
      {"Process monitoring", fun test_process_monitoring/0}].
 
 setup_registry() ->
@@ -432,12 +431,9 @@ integration_test_() ->
             {timeout,
              30,
              [{"Full server startup via new API", fun test_new_server_startup/0},
-              {"Legacy stdio compatibility", fun test_legacy_stdio_compatibility/0},
-              {"Integration with temporary registry", fun test_integration_with_temp_registry/0}]};
+              {"Legacy stdio compatibility", fun test_legacy_stdio_compatibility/0}]};
         false ->
-            {timeout,
-             30,
-             [{"Integration with temporary registry", fun test_integration_with_temp_registry/0}]}
+            []
     end.
 
 %% Check if the erlmcp module and its functions are available

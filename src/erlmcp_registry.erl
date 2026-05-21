@@ -9,8 +9,6 @@
          unregister_transport/1, find_server/1,
          find_transport/1, list_servers/0, list_transports/0, bind_transport_to_server/2,
          unbind_transport/1, get_server_for_transport/1]).
-%% Deprecated stubs — removed when erlmcp_server.erl is deleted (M1-15)
--export([route_to_server/3, route_to_transport/3]).
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
@@ -65,16 +63,6 @@ unregister_server(ServerId) ->
 -spec unregister_transport(transport_id()) -> ok.
 unregister_transport(TransportId) ->
     gen_server:call(?MODULE, {unregister_transport, TransportId}).
-
-%% Legacy routing — callers and these functions removed together in M1-15.
-%% New session code (M1-5/6) does NOT use these; it talks to transport directly.
--spec route_to_server(server_id(), transport_id(), term()) -> ok | {error, term()}.
-route_to_server(ServerId, TransportId, Message) ->
-    gen_server:cast(?MODULE, {route_to_server, ServerId, TransportId, Message}).
-
--spec route_to_transport(transport_id(), server_id(), term()) -> ok | {error, term()}.
-route_to_transport(TransportId, ServerId, Message) ->
-    gen_server:cast(?MODULE, {route_to_transport, TransportId, ServerId, Message}).
 
 -spec find_server(server_id()) -> {ok, {pid(), server_config()}} | {error, not_found}.
 find_server(ServerId) ->
@@ -291,22 +279,6 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 -spec handle_cast(term(), state()) -> {noreply, state()}.
-handle_cast({route_to_server, ServerId, TransportId, Message}, State) ->
-    case maps:get(ServerId, State#registry_state.servers, undefined) of
-        {ServerPid, _Config} ->
-            ServerPid ! {mcp_message, TransportId, Message};
-        undefined ->
-            logger:warning("Cannot route to server ~p: not found", [ServerId])
-    end,
-    {noreply, State};
-handle_cast({route_to_transport, TransportId, ServerId, Message}, State) ->
-    case maps:get(TransportId, State#registry_state.transports, undefined) of
-        {TransportPid, _Config} ->
-            TransportPid ! {mcp_response, ServerId, Message};
-        undefined ->
-            logger:warning("Cannot route to transport ~p: not found", [TransportId])
-    end,
-    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
