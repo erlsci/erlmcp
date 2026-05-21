@@ -98,6 +98,15 @@ server in the same VM complete initialize→ping→cancel; PropEr model of the e
 - **Ergonomics layer:** `erlmcp_schema` builder + the data-driven `add_tool/2` API +
   the `erlmcp_server_handler` behaviour (Phase 2 §1) — the "low-boilerplate without
   macros" story.
+- **Discoverability layer** (see `m2-discoverability-design.md`): wayfinding metadata
+  (`when_to_use`/`next`/`category`/`returns`/`summary`) as optional keys on the
+  `add_tool/2` map, derived into three surfaces — `InitializeResult.instructions`
+  (strategy/categories/entry points only), per-tool `_meta` in `tools/list`
+  (namespaced under `erlmcp`), and a generated **directory tool**. Behavioral hints go
+  in protocol `annotations`. The registration map is the single source of truth; all
+  surfaces are derived so they cannot drift (the failure mode that left 32/51 tools
+  ungoverned in the Fabryk reference server). The directory tool is an explicit
+  non-protocol extension (excluded from the M5 scorecard; see M5).
 - **Resources:** list/read, **templates**, subscribe/unsubscribe, `updated` +
   `list_changed`.
 - **Prompts:** list/get + `list_changed`.
@@ -111,7 +120,9 @@ Closes: A (output schema/validation, completion, logging, pagination, structured
 content, templates); B (god-module, records→opaque, boolean-param cleanup as these
 APIs are written). DoD: a non-trivial example server (rebuild the weather/calculator
 examples on the new core) exercises every server capability; conformance server
-score ≥ rmcp's reference.
+score ≥ rmcp's reference; **discoverability invariants DISC-1…DISC-9 closed**
+(`m2-discoverability-design.md` §9) — in particular 100% tool metadata coverage, a
+dangling-free and orphan-free `next` graph, and all surfaces derived from one source.
 
 ### M3 — Client + server→client features · **P1**
 *Goal: a symmetric client; the inverted-direction features work.*
@@ -157,7 +168,10 @@ unchanged over stdio, TCP, and streamable HTTP; transport conformance scenarios 
 
 - **`erlmcp_conformance`:** a Common Test harness that drives a real session through
   every L0–L4 capability and emits a **dated, versioned scorecard** (mirroring
-  rmcp's `conformance/results/*`).
+  rmcp's `conformance/results/*`). The protocol-native discoverability surfaces
+  (`instructions`, tool `_meta`, `annotations`, resources) are scored like any other
+  capability; the **directory tool is an erlmcp extension and is excluded from the
+  scorecard** (DISC-6, `m2-discoverability-design.md` §7).
 - Full test pyramid: EUnit (units, 1–2 asserts), Common Test (lifecycle/transport/
   e2e), **PropEr** (envelope + state-machine fuzzing). Real coverage gate (retire
   `--min_coverage=0`).
@@ -254,7 +268,7 @@ be cancelled mid-flight; conformance covers tasks.
 > request (M1); that single move unlocks cancellation, ping, and version
 > negotiation and gives erlmcp fault-isolation and cancellation semantics *better*
 > than rmcp's. Build the full server surface with real schema validation and a
-> no-macro ergonomic API (M2), a symmetric client with sampling/roots/elicitation
+> no-macro ergonomic API plus a derived, drift-proof discoverability layer (M2), a symmetric client with sampling/roots/elicitation
 > (M3), production transports behind one behaviour (M4), and — the part that earns
 > "rmcp-quality" — a conformance scorecard plus a real EUnit/CT/PropEr/Dialyzer
 > test pyramid and accurate docs (M5). Tasks and other BEAM-native wins follow
