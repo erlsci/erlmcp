@@ -4,7 +4,8 @@
 
 %% API exports
 -export([encode_request/3, encode_response/2, encode_error_response/3,
-         encode_notification/2, decode_message/1, create_error/3]).
+         encode_notification/2, decode_message/1, decode_and_classify/1,
+         create_error/3]).
 
 %% Types
 -type json_rpc_message() ::
@@ -50,6 +51,28 @@ decode_message(Json) when is_binary(Json) ->
             {error, {invalid_json, not_object}};
         {error, _} ->
             {error, {parse_error, invalid_json}}
+    end.
+
+-type classified() ::
+    {request, term(), binary(), map() | undefined} |
+    {response, term(), term()} |
+    {error_response, term(), map()} |
+    {notification, binary(), map() | undefined}.
+
+-spec decode_and_classify(binary()) ->
+    {ok, classified()} | {error, term()}.
+decode_and_classify(Json) when is_binary(Json) ->
+    case decode_message(Json) of
+        {ok, #json_rpc_request{id = Id, method = Method, params = Params}} ->
+            {ok, {request, Id, Method, Params}};
+        {ok, #json_rpc_response{id = Id, result = Result, error = undefined}} ->
+            {ok, {response, Id, Result}};
+        {ok, #json_rpc_response{id = Id, error = Error}} ->
+            {ok, {error_response, Id, Error}};
+        {ok, #json_rpc_notification{method = Method, params = Params}} ->
+            {ok, {notification, Method, Params}};
+        {error, _} = Err ->
+            Err
     end.
 
 -spec create_error(integer(), binary(), term()) -> #mcp_error{}.
