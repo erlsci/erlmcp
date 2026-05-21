@@ -12,14 +12,14 @@ MCP enables seamless communication between AI assistants and local services thro
 
 **Requirements:** Erlang/OTP 25 or later
 
-```bash
-# Add to your rebar.config deps
+```erlang
+%% rebar.config
 {deps, [
-    {erlmcp, {git, "https://github.com/erlsci/erlmcp.git", {branch, "main"}}}
+    {erlmcp, "0.5.1"}
 ]}.
+```
 
-# Fetch and compile
-rebar3 get-deps
+```bash
 rebar3 compile
 ```
 
