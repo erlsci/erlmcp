@@ -1,15 +1,42 @@
 -module(erlmcp_capabilities).
 
--export([negotiate/2, build_server/1, build_client/1]).
+-export([
+    negotiate_version/2,
+    supported_versions/0,
+    build_server_capabilities/1,
+    build_client_capabilities/1
+]).
 
--spec negotiate(map(), map()) -> {ok, map()} | {error, term()}.
-negotiate(_Local, _Remote) ->
-    {ok, #{}}.
+-define(SUPPORTED_VERSIONS, [<<"2025-11-25">>, <<"2024-11-05">>]).
 
--spec build_server(map()) -> map().
-build_server(_Config) ->
-    #{}.
+-spec supported_versions() -> [binary()].
+supported_versions() ->
+    ?SUPPORTED_VERSIONS.
 
--spec build_client(map()) -> map().
-build_client(_Config) ->
-    #{}.
+-spec negotiate_version(binary(), [binary()]) ->
+    {ok, binary()} | {error, no_common_version}.
+negotiate_version(ClientVersion, ServerVersions) ->
+    case lists:member(ClientVersion, ServerVersions) of
+        true ->
+            {ok, ClientVersion};
+        false ->
+            {error, no_common_version}
+    end.
+
+-spec build_server_capabilities(map()) -> map().
+build_server_capabilities(Registered) ->
+    maps:fold(
+        fun(Key, Opts, Acc) when is_map(Opts) ->
+                Acc#{Key => Opts};
+           (Key, true, Acc) ->
+                Acc#{Key => #{}};
+           (_Key, false, Acc) ->
+                Acc
+        end,
+        #{},
+        Registered
+    ).
+
+-spec build_client_capabilities(map()) -> map().
+build_client_capabilities(Registered) ->
+    build_server_capabilities(Registered).
