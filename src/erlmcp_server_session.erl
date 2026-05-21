@@ -261,13 +261,13 @@ dispatch_request(Method, Params, Handlers, _Ctx) ->
 
 send_response(#data{transport = Transport}, Id, Result) when is_pid(Transport) ->
     Json = erlmcp_json_rpc:encode_response(Id, Result),
-    erlmcp_transport_stdio:send(Transport, Json);
+    Transport ! {send, Json};
 send_response(_, _, _) ->
     ok.
 
 send_error(#data{transport = Transport}, Id, Code, Message) when is_pid(Transport) ->
     Json = erlmcp_json_rpc:encode_error_response(Id, Code, Message),
-    erlmcp_transport_stdio:send(Transport, Json);
+    Transport ! {send, Json};
 send_error(_, _, _, _) ->
     ok.
 
