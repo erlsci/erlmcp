@@ -24,8 +24,10 @@ protocol logic lands in M0.**
    and §10 (module map): the target architecture.
 5. **`docs/0.6.0/planning/phase3-gap-analysis.md`** — what is dead, and why.
 
-House style: the **Inaka Erlang Guidelines + the OTP reference texts** (per the
-repo `CLAUDE.md`), until a dedicated erlmcp `SKILL.md` exists.
+House style: load `./priv/ai/erlang/SKILL.md` and follow its own loading
+instructions (it indexes `priv/ai/erlang/guides/`) — the authoritative erlmcp
+Erlang skill, now the operative coding reference (supersedes the interim "Inaka +
+OTP texts" bar).
 
 ## Locked decisions (non-negotiable — do not relitigate)
 
@@ -96,7 +98,10 @@ repo `CLAUDE.md`), until a dedicated erlmcp `SKILL.md` exists.
 
 ## Working protocol
 
-- **Branch:** `0.6.0-m0`.
+- **Branch:** `task/0.6.0-m0`, cut from the `release/0.6.0` integration branch.
+  (CI's `on:` triggers fire for `main`, `release/**`, `task/**`, `feature/**`,
+  `epic/**`, and tags — a bare `0.6.0-m0` matches none, so milestone branches MUST
+  use the `task/` prefix. Open a PR into `release/0.6.0` to run CI and for CDC review.)
 - **Commit per ledger row** (or per coherent group). In the *same* commit that
   closes a row, update that row's `Status` → `done` and fill `Evidence` (commit
   SHA + the Verify command's output).
