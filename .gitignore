@@ -71,3 +71,4 @@ core.*
 # Local dev
 .claude
 /workbench
+/priv/ai
