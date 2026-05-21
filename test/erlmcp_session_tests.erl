@@ -155,3 +155,201 @@ version_negotiation_test() ->
     timer:sleep(50),
     ?assertEqual(uninitialized, gen_statem:call(Server, get_state)),
     gen_statem:stop(Server).
+
+parse_error_in_uninitialized_test() ->
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        name => <<"test-server">>,
+        version => <<"1.0">>
+    }),
+    erlmcp_server_session:send_message(Server, <<"not json">>),
+    timer:sleep(50),
+    ?assert(is_process_alive(Server)),
+    gen_statem:stop(Server).
+
+parse_error_in_operational_test() ->
+    {ok, Server} = init_server(),
+    erlmcp_server_session:send_message(Server, <<"not json">>),
+    timer:sleep(50),
+    ?assert(is_process_alive(Server)),
+    ?assertEqual(operational, gen_statem:call(Server, get_state)),
+    gen_statem:stop(Server).
+
+ping_in_operational_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test-server">>,
+        version => <<"1.0">>,
+        capabilities => #{}
+    }),
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, InitReq),
+    _InitResp = wait_transport_send(),
+    PingReq = erlmcp_json_rpc:encode_request(2, <<"ping">>, #{}),
+    erlmcp_server_session:send_message(Server, PingReq),
+    PingResp = wait_transport_send(),
+    {ok, Decoded} = erlmcp_codec:decode(PingResp),
+    ?assertEqual(2, maps:get(<<"id">>, Decoded)),
+    ?assertMatch(#{}, maps:get(<<"result">>, Decoded)),
+    gen_statem:stop(Server).
+
+worker_success_result_test() ->
+    Transport = self(),
+    OkHandler = fun(_Params, _Ctx) -> {ok, #{<<"answer">> => 42}} end,
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test-server">>,
+        version => <<"1.0">>,
+        capabilities => #{<<"tools">> => #{}},
+        handlers => #{<<"echo">> => OkHandler}
+    }),
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, InitReq),
+    _InitResp = wait_transport_send(),
+    EchoReq = erlmcp_json_rpc:encode_request(2, <<"echo">>, #{}),
+    erlmcp_server_session:send_message(Server, EchoReq),
+    EchoResp = wait_transport_send(),
+    {ok, Decoded} = erlmcp_codec:decode(EchoResp),
+    ?assertEqual(2, maps:get(<<"id">>, Decoded)),
+    ?assertMatch(#{<<"answer">> := 42}, maps:get(<<"result">>, Decoded)),
+    gen_statem:stop(Server).
+
+worker_error_result_test() ->
+    Transport = self(),
+    ErrHandler = fun(_Params, _Ctx) -> {error, -32001, <<"Not found">>} end,
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test-server">>,
+        version => <<"1.0">>,
+        capabilities => #{<<"tools">> => #{}},
+        handlers => #{<<"fail">> => ErrHandler}
+    }),
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, InitReq),
+    _InitResp = wait_transport_send(),
+    FailReq = erlmcp_json_rpc:encode_request(2, <<"fail">>, #{}),
+    erlmcp_server_session:send_message(Server, FailReq),
+    FailResp = wait_transport_send(),
+    {ok, Decoded} = erlmcp_codec:decode(FailResp),
+    ?assertEqual(2, maps:get(<<"id">>, Decoded)),
+    ?assertMatch(#{<<"code">> := -32001}, maps:get(<<"error">>, Decoded)),
+    gen_statem:stop(Server).
+
+method_not_found_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test-server">>,
+        version => <<"1.0">>,
+        capabilities => #{},
+        handlers => #{}
+    }),
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, InitReq),
+    _InitResp = wait_transport_send(),
+    UnknownReq = erlmcp_json_rpc:encode_request(2, <<"unknown/method">>, #{}),
+    erlmcp_server_session:send_message(Server, UnknownReq),
+    Resp = wait_transport_send(),
+    {ok, Decoded} = erlmcp_codec:decode(Resp),
+    ?assertMatch(#{<<"code">> := -32601}, maps:get(<<"error">>, Decoded)),
+    gen_statem:stop(Server).
+
+notifications_initialized_ignored_test() ->
+    {ok, Server} = init_server(),
+    Notif = erlmcp_json_rpc:encode_notification(<<"notifications/initialized">>, #{}),
+    erlmcp_server_session:send_message(Server, Notif),
+    timer:sleep(50),
+    ?assertEqual(operational, gen_statem:call(Server, get_state)),
+    gen_statem:stop(Server).
+
+get_state_all_states_test() ->
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    ?assertEqual(uninitialized, gen_statem:call(Server, get_state)),
+    gen_statem:stop(Server).
+
+uninitialized_ignores_unknown_events_test() ->
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    gen_statem:cast(Server, some_unknown_event),
+    Server ! some_info_message,
+    timer:sleep(50),
+    ?assert(is_process_alive(Server)),
+    gen_statem:stop(Server).
+
+cancel_nonexistent_request_test() ->
+    {ok, Server} = init_server(),
+    CancelNotif = erlmcp_json_rpc:encode_notification(
+        <<"notifications/cancelled">>, #{<<"requestId">> => 999}),
+    erlmcp_server_session:send_message(Server, CancelNotif),
+    timer:sleep(50),
+    ?assert(is_process_alive(Server)),
+    gen_statem:stop(Server).
+
+mfa_handler_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test-server">>,
+        version => <<"1.0">>,
+        capabilities => #{<<"tools">> => #{}},
+        handlers => #{<<"mfa">> => {erlmcp_capabilities, supported_versions}}
+    }),
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, InitReq),
+    _InitResp = wait_transport_send(),
+    MfaReq = erlmcp_json_rpc:encode_request(2, <<"mfa">>, #{}),
+    erlmcp_server_session:send_message(Server, MfaReq),
+    timer:sleep(200),
+    ?assert(is_process_alive(Server)),
+    gen_statem:stop(Server).
+
+terminate_test() ->
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    MonRef = monitor(process, Server),
+    gen_statem:stop(Server),
+    receive
+        {'DOWN', MonRef, process, Server, normal} -> ok
+    after 2000 -> ?assert(false)
+    end.
+
+%%====================================================================
+%% Helpers
+%%====================================================================
+
+init_server() ->
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        name => <<"test-server">>,
+        version => <<"1.0">>,
+        capabilities => #{<<"tools">> => #{}}
+    }),
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{},
+        <<"clientInfo">> => #{<<"name">> => <<"test">>, <<"version">> => <<"1.0">>}
+    }),
+    erlmcp_server_session:send_message(Server, InitReq),
+    timer:sleep(50),
+    {ok, Server}.
+
+wait_transport_send() ->
+    receive {send, Data} -> Data after 5000 -> error(transport_send_timeout) end.

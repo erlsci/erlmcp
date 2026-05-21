@@ -11,7 +11,9 @@ client_session_test_() ->
       fun(_) -> {"ping after init", fun ping_after_init/0} end,
       fun(_) -> {"cancel sends notification", fun cancel_sends_notification/0} end,
       fun(_) -> {"init error stays uninitialized", fun init_error/0} end,
-      fun(_) -> {"junk in uninitialized is ignored", fun junk_ignored/0} end]}.
+      fun(_) -> {"junk in uninitialized is ignored", fun junk_ignored/0} end,
+      fun(_) -> {"operational ignores junk", fun operational_ignores_junk/0} end,
+      fun(_) -> {"operational ignores unknown events", fun operational_unknown_events/0} end]}.
 
 start_stop() ->
     Transport = spawn_link(fun() -> sink() end),
@@ -109,6 +111,21 @@ init_response(ReqJson) ->
         <<"capabilities">> => #{},
         <<"serverInfo">> => #{<<"name">> => <<"t">>, <<"version">> => <<"1">>}
     }).
+
+operational_ignores_junk() ->
+    {C, _T} = do_init(),
+    gen_statem:cast(C, {transport_data, <<"not json">>}),
+    timer:sleep(50),
+    ?assertEqual(operational, gen_statem:call(C, get_state)),
+    erlmcp_client_session:stop(C).
+
+operational_unknown_events() ->
+    {C, _T} = do_init(),
+    gen_statem:cast(C, totally_unknown_event),
+    C ! some_random_info,
+    timer:sleep(50),
+    ?assert(is_process_alive(C)),
+    erlmcp_client_session:stop(C).
 
 drain_mailbox() ->
     receive _ -> drain_mailbox() after 0 -> ok end.

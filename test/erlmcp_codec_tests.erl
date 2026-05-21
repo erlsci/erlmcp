@@ -34,3 +34,6 @@ empty_map_roundtrip_test() ->
     {ok, Bin} = erlmcp_codec:encode(#{}),
     {ok, Decoded} = erlmcp_codec:decode(Bin),
     ?assertEqual(#{}, Decoded).
+
+encode_unencodable_test() ->
+    ?assertMatch({error, {encode_error, badarg}}, erlmcp_codec:encode(make_ref())).

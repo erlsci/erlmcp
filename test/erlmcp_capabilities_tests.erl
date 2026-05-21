@@ -42,3 +42,7 @@ supported_versions_nonempty_test() ->
     Versions = erlmcp_capabilities:supported_versions(),
     ?assert(length(Versions) > 0),
     ?assert(lists:all(fun is_binary/1, Versions)).
+
+build_client_capabilities_test() ->
+    Caps = erlmcp_capabilities:build_client_capabilities(#{<<"roots">> => #{}}),
+    ?assertEqual(#{<<"roots">> => #{}}, Caps).
