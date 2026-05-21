@@ -42,7 +42,7 @@
   ]},
   {modules, []},
   {licenses, ["Apache-2.0"]},
-  {links, [{"GitHub", "https://github.com/banyan-platform/erlmcp"}]},
+  {links, [{"GitHub", "https://github.com/erlsci/erlmcp"}]},
   {build_tools, ["rebar3"]},
   {files, ["src", "include", "rebar.config", "config", "docs", "README.md", "LICENSE"]},
 
@@ -55,6 +55,6 @@
   ]},
 
   %% Additional metadata
-  {exclude_files, ["test/*", "priv/test/*", "logs/*", "priv/release-notes", "examples/*"]},
+  {exclude_files, ["test/*", "priv/test/*", "logs/*", "priv/release-notes/*", "examples/*", "priv/scripts/*", "priv/images/*", "docs"]},
   {include_files, ["include/*.hrl"]}
  ]}.
