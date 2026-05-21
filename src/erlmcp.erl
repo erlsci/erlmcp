@@ -114,7 +114,7 @@ start_transport(TransportId, Type) ->
 start_transport(TransportId, Type, Config) ->
     case Type of
         stdio ->
-            case erlmcp_transport_stdio:start_link(self()) of
+            case erlmcp_transport_stdio:start_link(TransportId, Config) of
                 {ok, TransportPid} ->
                     TransportConfig = Config#{type => Type},
                     case register_transport_with_registry(TransportId,

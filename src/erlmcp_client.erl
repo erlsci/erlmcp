@@ -320,6 +320,9 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 -spec handle_info(term(), state()) -> {noreply, state()}.
+handle_info({transport_data, Data}, State) ->
+    handle_info({transport_message, Data}, State);
+
 handle_info({transport_message, Data}, State) ->
     case erlmcp_json_rpc:decode_message(Data) of
         {ok,
@@ -356,7 +359,11 @@ code_change(_OldVsn, State, _Extra) ->
 
 -spec init_transport(transport_opts()) -> {ok, module(), term()} | {error, term()}.
 init_transport({stdio, _Opts}) ->
-    {ok, erlmcp_transport_stdio, self()};
+    Config = #{session => self(), test_mode => true},
+    case erlmcp_transport_stdio:start_link(stdio, Config) of
+        {ok, Pid} -> {ok, erlmcp_transport_stdio, Pid};
+        {error, _} = Error -> Error
+    end;
 init_transport({tcp, Opts}) ->
     {ok, erlmcp_transport_tcp, Opts};
 init_transport({http, [Opts]}) when is_map(Opts) ->
