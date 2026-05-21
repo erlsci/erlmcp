@@ -33,4 +33,4 @@ jobs:
     - name: Run Tests
       run: rebar3 eunit -v
     - name: Test Coverage
-      run: rebar3 as test cover -v --min_coverage=0
+      run: rebar3 as test cover -v --min_coverage=90
