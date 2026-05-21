@@ -43,16 +43,13 @@ encode_notification(Method, Params) when is_binary(Method) ->
 
 -spec decode_message(binary()) -> decode_result().
 decode_message(Json) when is_binary(Json) ->
-    try jsx:decode(Json, [return_maps]) of
-        Data when is_map(Data) ->
+    case erlmcp_codec:decode(Json) of
+        {ok, Data} when is_map(Data) ->
             parse_json_rpc(Data);
-        _ ->
-            {error, {invalid_json, not_object}}
-    catch
-        error:badarg ->
-            {error, {parse_error, invalid_json}};
-        Class:Reason ->
-            {error, {parse_error, {Class, Reason}}}
+        {ok, _} ->
+            {error, {invalid_json, not_object}};
+        {error, _} ->
+            {error, {parse_error, invalid_json}}
     end.
 
 -spec create_error(integer(), binary(), term()) -> #mcp_error{}.
@@ -68,7 +65,8 @@ create_error(Code, Message, Data) when is_integer(Code), is_binary(Message) ->
 -spec encode_message(json_rpc_message()) -> binary().
 encode_message(Message) ->
     Map = build_message_map(Message),
-    jsx:encode(Map).
+    {ok, Bin} = erlmcp_codec:encode(Map),
+    Bin.
 
 -spec build_message_map(json_rpc_message()) -> map().
 build_message_map(#json_rpc_request{id = Id,
