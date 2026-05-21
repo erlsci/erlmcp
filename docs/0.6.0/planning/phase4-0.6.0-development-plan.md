@@ -55,9 +55,11 @@ deliverables, the Phase 3 gaps it closes, and its definition of done.
 - Delete the `_new` forks and the unsupervised duplicate server; remove the
   phantom `erlmcp_client_sup` from `app.src`; remove dispatch to nonexistent
   `*_tcp_new`/`*_http_new`. (Closes D: dead code, phantom modules, broken sup.)
-- Decisions to lock: JSON library (keep `jsx` behind an `erlmcp_codec` boundary, or
-  move to `jsone`/`thoas` — decide once); confirm `jesse` as the schema validator;
-  minimum OTP version (recommend OTP 26+); rebar3 profiles and a real coverage gate.
+- Decisions (locked 2026-05-20): **JSON library** = keep `jsx`, isolated behind the
+  `erlmcp_codec` boundary so the choice stays reversible; **schema validator** =
+  `jesse`; **minimum OTP** = **25+** (note: forgoes `-doc`/EEP-48 attributes from
+  OTP 27 — M5 docs use edoc/ex_doc); **coverage gate** = **90% from M0, ratcheting to
+  95% by M5** (retire `--min_coverage=0`); plus rebar3 profiles.
 - Stand up the new module skeleton from Phase 2 §10 (empty modules + behaviours +
   specs), so the architecture is visible before logic lands.
 - Write a short `MIGRATION-0.5-to-0.6.md` stub (filled in as the API solidifies).
@@ -238,10 +240,10 @@ be cancelled mid-flight; conformance covers tasks.
 | Risk / question | Mitigation / decision needed |
 |---|---|
 | **Schema ergonomics gap** (no derive-from-types) is inherent | Invest in `erlmcp_schema` builder quality; accept and document the limit (Phase 2 §1). Decide how far to push the builder. |
-| JSON library choice (`jsx` vs `jsone`/`thoas`) | Decide in M0; isolate behind `erlmcp_codec` so it's reversible. |
+| JSON library choice (`jsx` vs `jsone`/`thoas`) | **Resolved (2026-05-20):** keep `jsx` behind `erlmcp_codec`; reversible by design. |
 | Streamable-HTTP transport complexity (sessions, resumability) | Largest transport lift; may slip within M4 — keep stdio/TCP as the guaranteed set. |
 | Conformance reference: what do we measure against? | Use the MCP spec + rmcp's published scenarios as the bar; consider interop tests against rmcp itself. |
-| Minimum OTP version | Recommend OTP 26+; confirm with owner (affects gen_statem features, maps, `-doc`). |
+| Minimum OTP version | **Resolved (2026-05-20):** OTP 25+. Trade-off: no `-doc`/EEP-48 attributes (OTP 27); docs use edoc/ex_doc. gen_statem + maps unaffected. |
 | Owner's erlmcp SKILL.md not yet written | The Inaka rubric is the interim bar; revisit convention-dependent calls (Phase 2 flags them) once the SKILL.md lands. |
 
 ---
