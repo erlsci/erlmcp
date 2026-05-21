@@ -1,19 +1,35 @@
 -module(erlmcp_transport).
 
-%% Transport behavior definition
+%% Transport behaviour definition (Phase 2 §6).
+%% Each transport is a gen_server implementing these callbacks.
+%% Inbound data is delivered directly to the bound session process.
 
--type transport_state() :: term().
--type transport_opts() :: term().
+-type transport_id() :: atom().
+-type config() :: map().
+-type state() :: term().
 
-%% Callback definitions
--callback init(Opts :: transport_opts()) ->
-                  {ok, State :: transport_state()} | {error, Reason :: term()}.
--callback send(State :: transport_state(), Data :: iodata()) ->
-                  ok | {error, Reason :: term()}.
--callback close(State :: transport_state()) -> ok.
+-type transport_message() ::
+      {transport_data, binary()}
+    | {transport_connected, map()}
+    | {transport_disconnected, term()}
+    | {transport_error, atom(), term()}.
 
-%% Optional callbacks
--optional_callbacks([close/1]).
+%% Core callbacks
+-callback init(TransportId :: transport_id(), Config :: config()) ->
+    {ok, state()} | {error, term()}.
 
-%% Type exports
--export_type([transport_state/0, transport_opts/0]).
+-callback send(state(), iodata()) ->
+    ok | {error, term()}.
+
+-callback close(state()) -> ok.
+
+%% Optional callbacks for richer transports
+-callback get_info(state()) ->
+    #{type => atom(), status => atom(), peer => term()}.
+
+-callback handle_transport_call(Request :: term(), state()) ->
+    {reply, term(), state()} | {error, term()}.
+
+-optional_callbacks([get_info/1, handle_transport_call/2]).
+
+-export_type([transport_id/0, config/0, state/0, transport_message/0]).
