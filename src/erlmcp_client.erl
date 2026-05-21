@@ -401,7 +401,14 @@ send_message(#state{transport = Transport, transport_state = TransportState}, Me
 build_initialize_request(Capabilities) ->
     #{<<"protocolVersion">> => ?MCP_VERSION,
       <<"capabilities">> => encode_capabilities(Capabilities),
-      <<"clientInfo">> => #{<<"name">> => <<"erlmcp">>, <<"version">> => <<"0.1.0">>}}.
+      <<"clientInfo">> => #{<<"name">> => <<"erlmcp">>, <<"version">> => app_version()}}.
+
+-spec app_version() -> binary().
+app_version() ->
+    case application:get_key(erlmcp, vsn) of
+        {ok, Vsn} -> list_to_binary(Vsn);
+        undefined -> <<"unknown">>
+    end.
 
 -spec build_prompt_params(binary(), map()) -> map().
 build_prompt_params(Name, Arguments) when map_size(Arguments) =:= 0 ->

@@ -1,6 +1,6 @@
 {application, erlmcp,
  [{description, "Erlang Model Context Protocol (MCP) SDK"},
-  {vsn, "0.5.0"},
+  {vsn, "0.5.1"},
   {registered, [
       erlmcp_sup,
       erlmcp_client_sup,
