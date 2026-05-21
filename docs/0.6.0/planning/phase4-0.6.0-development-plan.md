@@ -102,7 +102,7 @@ server in the same VM complete initialize→ping→cancel; PropEr model of the e
   (`when_to_use`/`next`/`category`/`returns`/`summary`) as optional keys on the
   `add_tool/2` map, derived into three surfaces — `InitializeResult.instructions`
   (strategy/categories/entry points only), per-tool `_meta` in `tools/list`
-  (namespaced under `erlmcp`), and a generated **directory tool**. Behavioral hints go
+  (reverse-DNS namespace `io.erlmcp/`), and a generated **directory tool**. Behavioral hints go
   in protocol `annotations`. The registration map is the single source of truth; all
   surfaces are derived so they cannot drift (the failure mode that left 32/51 tools
   ungoverned in the Fabryk reference server). The directory tool is an explicit

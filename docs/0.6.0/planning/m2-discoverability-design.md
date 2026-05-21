@@ -32,27 +32,28 @@ surface, and verify completeness as a ledgered invariant.**
 ## 2. Protocol grounding (verified against the 2025-11-25 schema)
 
 Contrary to earlier advice that "this isn't in the protocol," most of what we
-need is protocol-native. Verified against
-`schema/2025-11-25/schema.ts`:
+need is protocol-native. Verified against the in-repo schema copy
+`planning/schema.ts` (line numbers below refer to that file):
 
-- **`InitializeResult.instructions?: string`** (schema line ~298). Free-form
-  server guidance returned on the first call, which clients MAY inject into the
-  system prompt. This is the protocol-native home for the "SKILL.md on first
-  contact."
-- **`Tool extends BaseMetadata, Icons`** (line ~1255) — so every tool carries
-  `name` + `title` (BaseMetadata) and `icons` (Icons) as standard fields.
-- **`Tool._meta?: { [key: string]: unknown }`** (line ~1302). The sanctioned,
+- **`InitializeResult.instructions?: string`** (interface at line 281, field at
+  294). Free-form server guidance returned on the first call, which clients MAY
+  inject into the system prompt. This is the protocol-native home for the
+  "SKILL.md on first contact."
+- **`Tool extends BaseMetadata, Icons`** (line 1251) — so every tool carries
+  `name` + `title` (BaseMetadata, line 530) and `icons` (Icons, line 510) as
+  standard fields.
+- **`Tool._meta?: { [key: string]: unknown }`** (line 1298). The sanctioned,
   in-envelope extension point. Rides `tools/list`; clients that don't read it
   see a normal tool. This is the home for navigational metadata.
-- **`ToolAnnotations`** (lines ~1186–1228): `readOnlyHint`, `destructiveHint`,
+- **`ToolAnnotations`** (lines 1182–1224): `readOnlyHint`, `destructiveHint`,
   `idempotentHint`, `openWorldHint`, `title`. The protocol-native home for
-  *behavioral* hints. (Spec warning, line ~1181: clients must not make tool-use
+  *behavioral* hints. (Spec warning, line 1177: clients must not make tool-use
   decisions based on annotations from untrusted servers — these are hints, not
   security boundaries. The same caveat applies to our `_meta` hints.)
 - **`ToolExecution.taskSupport?: "forbidden" | "optional" | "required"`**
-  (lines ~1235–1248). Task-augmented execution is first-class in the tool
-  definition — i.e. *discoverability of execution semantics* is protocol-native.
-  Relevant to M6.
+  (interface at 1231, field at 1243). Task-augmented execution is first-class in
+  the tool definition — i.e. *discoverability of execution semantics* is
+  protocol-native. Relevant to M6.
 
 What is **not** in the protocol: the structured *wayfinding* vocabulary —
 `when_to_use`, `next`, `category` as machine-readable fields — and a single
@@ -106,8 +107,8 @@ Behavioral semantics (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
   points (e.g. "start with `semantic_search`; call the directory tool for the
   full catalog"). Auto-injected by compliant clients.
 - **Per-tool `_meta` in `tools/list` (Tier 1, protocol-native).** The
-  wayfinding vocabulary (§4) under a reserved `erlmcp` namespace (§8), travelling
-  with the standard list call every client makes.
+  wayfinding vocabulary (§4) under the project's reverse-DNS `_meta` prefix
+  (`io.erlmcp/`, §8), travelling with the standard list call every client makes.
 - **The directory tool (Tier 2, supplemental).** A generated tool returning the
   same metadata as one categorized, structured payload — for models that prefer
   one call over parsing `_meta` across a list. A convenience projection, not the
@@ -135,40 +136,51 @@ omittable for a purist who wants a spec-only server. Least surprise for library
 users: discoverability uses protocol-native carriers wherever possible, and the
 one extension is clearly labeled and optional.
 
-## 8. Open verification item
+## 8. The `_meta` key-naming grammar (verified)
 
-The `_meta` **key-naming grammar** is defined in spec prose
-(`specification/2025-11-25/basic/index#meta`), not in `schema.ts`. Recollection:
-MCP reserves a `modelcontextprotocol.io/`-style prefix namespace and recommends
-a `label/key` convention. We intend to namespace our keys under an `erlmcp`
-label (e.g. `erlmcp.io/when_to_use` or similar). **Confirm the exact grammar
-against that doc page before locking key names** (DISC-5). This is the one
-assertion in this design sourced from memory rather than from the schema we
-read.
+Verified 2026-05-20 against the spec prose
+(`specification/2025-11-25/basic` → "General fields → `_meta`"). A key has an
+optional **prefix** plus a **name**:
+
+- **Prefix** (if present): a series of labels separated by dots (`.`), followed
+  by a slash (`/`). Each label starts with a letter and ends with a letter or
+  digit; interior characters may be letters, digits, or hyphens. Reverse-DNS
+  notation is RECOMMENDED (`com.example/`, not `example.com/`).
+- **Reserved:** any prefix whose **second label** is `modelcontextprotocol` or
+  `mcp` is reserved for MCP (`io.modelcontextprotocol/`, `dev.mcp/`,
+  `org.modelcontextprotocol.api/`, `com.mcp.tools/`). Note `com.example.mcp/` is
+  *not* reserved — the second label is `example`.
+- **Name:** unless empty, begins and ends with `[a-z0-9A-Z]`; may contain `-`,
+  `_`, `.` in between.
+
+**Decision:** namespace our wayfinding keys under the project's reverse-DNS
+prefix `io.erlmcp/` — i.e. `io.erlmcp/when_to_use`, `io.erlmcp/next`,
+`io.erlmcp/category`, `io.erlmcp/returns`, `io.erlmcp/summary`. This is
+well-formed (reverse-DNS) and *not* reserved (second label `erlmcp`). The only
+remaining choice is the domain itself: `io.erlmcp/` assumes the project claims
+`erlmcp.io`; if you'd rather anchor to the GitHub org, `io.github.erlsci/` is
+the reverse-DNS of `erlsci.github.io`. Either is spec-valid; pick the one whose
+domain you actually control.
+
+(Earlier draft suggested `erlmcp.io/…`; that was forward DNS and is corrected
+here to the reverse-DNS form the spec recommends.)
 
 ---
 
 ## 9. Ledger (folds into M2)
 
-These rows are scoped to discoverability within M2. They are written in the
-`LEDGER_DISCIPLINE.md` column format and are ready to merge into the full M2
-ledger when it is created. Each `Verify` is intended to be a test or grep that
-**fails if the criterion is violated** (not merely one that compiles). All rows
-start `open`.
+The acceptance criteria for this design — **DISC-1 … DISC-9** — live as the
+canonical, operational ledger (the place where `Status`/`Evidence` are updated
+during implementation, in `LEDGER_DISCIPLINE.md` column format) at:
 
-| ID | Criterion | Verify | Significance | Origin | Status | Evidence | Notes |
-|----|-----------|--------|--------------|--------|--------|----------|-------|
-| DISC-1 | Every registered tool has non-empty `category` and `when_to_use` in its registration metadata. | EUnit `test_all_tools_have_metadata` iterates the registry and asserts both keys present + non-empty for every tool; fails listing any tool missing either. | correctness | This design §3; music-theory gap | open | | The direct countermeasure to the 32/51 "general"/empty failure. |
-| DISC-2 | The `next` wayfinding graph has no dangling edges: every tool named in any `next` is a registered tool. | EUnit `test_next_graph_no_dangling_edges` collects all `next` targets and asserts each resolves to a registered tool name. | correctness | This design §3 | open | | |
-| DISC-3 | No orphan tools: every tool is reachable in the `next` graph from at least one entry point named in `instructions`. | EUnit `test_all_tools_reachable_from_entrypoints` does graph reachability from the declared entry points; fails listing unreachable tools. | correctness | This design §3,§5 | open | | Catches tools that exist but have no wayfinding path to them. |
-| DISC-4 | `instructions`, each tool's `_meta`, and the directory payload are all derived from the single registration map — no hand-maintained parallel metadata store. | EUnit `test_surfaces_share_source`: register a tool with known metadata, then assert the same values appear in `_meta` (via `tools/list`), in the directory payload, and that its category appears in `instructions`. | serious | This design §3 | open | | The architectural invariant that prevents the reference-impl failure mode. |
-| DISC-5 | Wayfinding `_meta` keys use the reserved `erlmcp` namespace and conform to the MCP `_meta` key-naming grammar. | EUnit `test_meta_key_namespace` asserts every wayfinding `_meta` key matches the namespace pattern; grammar confirmed against `basic/index#meta`. | correctness | This design §8 | open | | Blocked on the §8 grammar confirmation; re-entry: once the prefix grammar is verified. |
-| DISC-6 | A directory tool is registered, returns a categorized projection of all tools, and is excluded from the conformance scorecard. | EUnit `test_directory_covers_all_tools` (directory entry count == registry tool count, minus the directory tool itself) + `test_directory_excluded_from_conformance` asserts the conformance manifest omits it. | correctness | This design §5,§7 | open | | |
-| DISC-7 | Behavioral hints live in protocol `annotations`, not duplicated in wayfinding `_meta`. | EUnit `test_no_behavioral_keys_in_meta` asserts wayfinding `_meta` contains none of `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`. | polish | This design §4 | open | | |
-| DISC-8 | `instructions` describes strategy/categories/entry points only and does not enumerate individual tools by name. | EUnit `test_instructions_no_tool_enumeration`: register N tools, assert the `instructions` string does not contain per-tool names beyond declared entry points; remains byte-identical after a runtime add/remove. | correctness | This design §6 | open | | Prevents `instructions` going stale against `tools/list_changed`. |
-| DISC-9 | Directory payload and per-tool `_meta` update automatically on runtime tool add/remove (consistent with `notifications/tools/list_changed`). | EUnit `test_runtime_change_reflected`: add a tool at runtime, assert it appears in the directory payload and `tools/list` `_meta`; remove it, assert it disappears. | correctness | This design §3,§6 | open | | |
+> `../milestones/M2-server-feature-surface-ledger.md`
 
-### Significance legend
-`serious` = architectural invariant whose violation reintroduces the failure
-this design exists to prevent. `correctness` = a guarantee the feature claims.
-`polish` = hygiene that does not by itself reintroduce the failure.
+They are kept there rather than duplicated here so the two can't drift — the same
+single-source-of-truth discipline this design applies to tool metadata (§3). This
+section is the *design rationale*; the ledger is the *verifiable contract*. In
+brief, the rows cover: 100% tool metadata coverage (DISC-1); a dangling-free
+(DISC-2) and orphan-free (DISC-3) `next` graph; all surfaces derived from one
+registration map (DISC-4, the `serious` invariant); namespaced `_meta` keys
+(DISC-5); the directory tool's coverage and conformance exclusion (DISC-6);
+behavioral hints kept in `annotations` (DISC-7); non-enumerating, drift-proof
+`instructions` (DISC-8); and runtime-change consistency (DISC-9).
