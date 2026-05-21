@@ -114,7 +114,7 @@ start_transport(TransportId, Type) ->
 start_transport(TransportId, Type, Config) ->
     case Type of
         stdio ->
-            case erlmcp_transport_stdio_new:start_link(TransportId, Config) of
+            case erlmcp_transport_stdio:start_link(self()) of
                 {ok, TransportPid} ->
                     TransportConfig = Config#{type => Type},
                     case register_transport_with_registry(TransportId,
@@ -151,7 +151,7 @@ stop_transport(TransportId) ->
                     erlmcp_registry:unregister_transport(TransportId),
                     case is_process_alive(TransportPid) of
                         true ->
-                            erlmcp_transport_stdio_new:close(TransportPid),
+                            erlmcp_transport_stdio:close(TransportPid),
                             logger:info("Stopped transport ~p", [TransportId]),
                             ok;
                         false ->

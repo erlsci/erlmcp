@@ -21,11 +21,11 @@ start_child(ServerId, Config) ->
     % and failures are handled by the registry cleanup
     ChildSpec =
         #{id => ServerId,
-          start => {erlmcp_server_new, start_link, [ServerId, Config]},
+          start => {erlmcp_server, start_link, [ServerId, Config]},
           restart => temporary,  % Don't auto-restart - let registry handle failures
           shutdown => 5000,
           type => worker,
-          modules => [erlmcp_server_new]},
+          modules => [erlmcp_server]},
     supervisor:start_child(?MODULE, ChildSpec).
 
 %%====================================================================
@@ -41,11 +41,11 @@ init([]) ->
 
     % Template child spec for server instances
     ChildSpecs =
-        [#{id => erlmcp_server_new,
-           start => {erlmcp_server_new, start_link, []},
+        [#{id => erlmcp_server,
+           start => {erlmcp_server, start_link, []},
            restart => temporary,
            shutdown => 5000,
            type => worker,
-           modules => [erlmcp_server_new]}],
+           modules => [erlmcp_server]}],
 
     {ok, {SupFlags, ChildSpecs}}.

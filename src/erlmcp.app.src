@@ -3,7 +3,6 @@
   {vsn, "0.5.1"},
   {registered, [
       erlmcp_sup,
-      erlmcp_client_sup,
       erlmcp_server_sup
   ]},
   {applications, [

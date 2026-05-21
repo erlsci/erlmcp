@@ -19,11 +19,11 @@ start_child(TransportId, Type, Config) ->
     Module =
         case Type of
             stdio ->
-                erlmcp_transport_stdio_new;
+                erlmcp_transport_stdio;
             tcp ->
-                erlmcp_transport_tcp_new;
+                erlmcp_transport_tcp;
             http ->
-                erlmcp_transport_http_new
+                erlmcp_transport_http
         end,
 
     ChildSpec =
