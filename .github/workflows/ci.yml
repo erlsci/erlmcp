@@ -30,7 +30,13 @@ jobs:
     - name: Xref Checks
       run: rebar3 xref
 
-    - name: Run Tests
+    - name: EUnit Tests
       run: rebar3 eunit -v
+    - name: Common Test
+      run: rebar3 ct -v
+    - name: PropEr Tests
+      run: rebar3 proper -c
+    - name: Dialyzer
+      run: rebar3 dialyzer
     - name: Test Coverage
       run: rebar3 as test cover -v --min_coverage=90

@@ -317,7 +317,7 @@ mfa_handler_test() ->
     _InitResp = wait_transport_send(),
     MfaReq = erlmcp_json_rpc:encode_request(2, <<"mfa">>, #{}),
     erlmcp_server_session:send_message(Server, MfaReq),
-    timer:sleep(200),
+    _ErrorResp = wait_transport_send(),
     ?assert(is_process_alive(Server)),
     gen_statem:stop(Server).
 
@@ -331,6 +331,353 @@ terminate_test() ->
         {'DOWN', MonRef, process, Server, normal} -> ok
     after 2000 -> ?assert(false)
     end.
+
+%%====================================================================
+%% Tools — registration, list, call, validation (M2a)
+%%====================================================================
+
+tools_register_and_list_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"echo">>,
+        description => <<"Echo tool">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    }),
+    [Tool] = erlmcp_server_session:list_tools(Server),
+    ?assertEqual(<<"echo">>, maps:get(name, Tool)),
+    gen_statem:stop(Server).
+
+tools_unregister_test() ->
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"t">>, description => <<"t">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    }),
+    ok = erlmcp_server_session:unregister_tool(Server, <<"t">>),
+    ?assertEqual([], erlmcp_server_session:list_tools(Server)),
+    gen_statem:stop(Server).
+
+tools_register_handler_module_test() ->
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_handler(Server, test_calc_handler),
+    Tools = erlmcp_server_session:list_tools(Server),
+    ?assert(length(Tools) > 0),
+    gen_statem:stop(Server).
+
+tools_call_fun_handler_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"double">>,
+        description => <<"Double">>,
+        input_schema => erlmcp_schema:object([
+            erlmcp_schema:field(<<"x">>, erlmcp_schema:number(), [required])
+        ]),
+        handler => fun(#{<<"x">> := X}, _) ->
+            {ok, erlmcp:text(integer_to_binary(trunc(X * 2)))}
+        end
+    }),
+    init_server_with_transport(Server),
+    CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
+        <<"name">> => <<"double">>,
+        <<"arguments">> => #{<<"x">> => 21}
+    }),
+    erlmcp_server_session:send_message(Server, CallReq),
+    Resp = decode_resp(wait_transport_send()),
+    Result = maps:get(<<"result">>, Resp),
+    [Content] = maps:get(<<"content">>, Result),
+    ?assertEqual(<<"42">>, maps:get(<<"text">>, Content)),
+    gen_statem:stop(Server).
+
+tools_call_behaviour_handler_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_handler(Server, test_calc_handler),
+    init_server_with_transport(Server),
+    CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
+        <<"name">> => <<"add">>,
+        <<"arguments">> => #{<<"a">> => 3, <<"b">> => 4}
+    }),
+    erlmcp_server_session:send_message(Server, CallReq),
+    Resp = decode_resp(wait_transport_send()),
+    [Content] = maps:get(<<"content">>, maps:get(<<"result">>, Resp)),
+    ?assertEqual(<<"7">>, maps:get(<<"text">>, Content)),
+    gen_statem:stop(Server).
+
+tools_call_input_validation_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"strict">>,
+        description => <<"Strict">>,
+        input_schema => erlmcp_schema:object([
+            erlmcp_schema:field(<<"name">>, erlmcp_schema:string(), [required])
+        ]),
+        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    }),
+    init_server_with_transport(Server),
+    CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
+        <<"name">> => <<"strict">>,
+        <<"arguments">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, CallReq),
+    Resp = decode_resp(wait_transport_send()),
+    ?assertMatch(#{<<"error">> := #{<<"code">> := -32602}}, Resp),
+    gen_statem:stop(Server).
+
+tools_call_unknown_tool_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    init_server_with_transport(Server),
+    CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
+        <<"name">> => <<"nonexistent">>,
+        <<"arguments">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, CallReq),
+    Resp = decode_resp(wait_transport_send()),
+    ?assertMatch(#{<<"error">> := #{<<"code">> := -32602}}, Resp),
+    gen_statem:stop(Server).
+
+tools_call_missing_name_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    init_server_with_transport(Server),
+    CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
+        <<"arguments">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, CallReq),
+    Resp = decode_resp(wait_transport_send()),
+    ?assertMatch(#{<<"error">> := #{<<"code">> := -32602}}, Resp),
+    gen_statem:stop(Server).
+
+tools_list_via_protocol_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"t1">>,
+        description => <<"Tool 1">>,
+        input_schema => erlmcp_schema:object([]),
+        category => <<"cat_a">>,
+        when_to_use => <<"When needed">>,
+        annotations => #{readOnlyHint => true},
+        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    }),
+    init_server_with_transport(Server),
+    ListReq = erlmcp_json_rpc:encode_request(2, <<"tools/list">>, #{}),
+    erlmcp_server_session:send_message(Server, ListReq),
+    Resp = decode_resp(wait_transport_send()),
+    Result = maps:get(<<"result">>, Resp),
+    [Tool] = maps:get(<<"tools">>, Result),
+    ?assertEqual(<<"t1">>, maps:get(<<"name">>, Tool)),
+    ?assertEqual(<<"Tool 1">>, maps:get(<<"description">>, Tool)),
+    ?assertMatch(#{<<"readOnlyHint">> := true}, maps:get(<<"annotations">>, Tool)),
+    Meta = maps:get(<<"_meta">>, Tool),
+    ?assertEqual(<<"cat_a">>, maps:get(<<"io.erlmcp/category">>, Meta)),
+    gen_statem:stop(Server).
+
+tools_structured_output_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    OutSchema = erlmcp_schema:object([
+        erlmcp_schema:field(<<"result">>, erlmcp_schema:number(), [required])
+    ]),
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"calc">>,
+        description => <<"Calc">>,
+        input_schema => erlmcp_schema:object([]),
+        output_schema => OutSchema,
+        handler => fun(_, _) -> {ok, erlmcp:text(<<"42">>), #{<<"result">> => 42}} end
+    }),
+    init_server_with_transport(Server),
+    CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
+        <<"name">> => <<"calc">>, <<"arguments">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, CallReq),
+    Resp = decode_resp(wait_transport_send()),
+    Result = maps:get(<<"result">>, Resp),
+    ?assertMatch(#{<<"structuredContent">> := #{<<"result">> := 42}}, Result),
+    gen_statem:stop(Server).
+
+tools_output_validation_failure_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    OutSchema = erlmcp_schema:object([
+        erlmcp_schema:field(<<"value">>, erlmcp_schema:string(), [required])
+    ]),
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"bad">>,
+        description => <<"Bad output">>,
+        input_schema => erlmcp_schema:object([]),
+        output_schema => OutSchema,
+        handler => fun(_, _) -> {ok, erlmcp:text(<<"x">>), #{<<"wrong">> => 1}} end
+    }),
+    init_server_with_transport(Server),
+    CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
+        <<"name">> => <<"bad">>, <<"arguments">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, CallReq),
+    Resp = decode_resp(wait_transport_send()),
+    ?assertMatch(#{<<"error">> := #{<<"code">> := -32603}}, Resp),
+    gen_statem:stop(Server).
+
+tools_list_changed_notification_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    init_server_with_transport(Server),
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"dyn">>, description => <<"Dyn">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    }),
+    Notif = decode_resp(wait_transport_send()),
+    ?assertEqual(<<"notifications/tools/list_changed">>,
+                 maps:get(<<"method">>, Notif)),
+    ok = erlmcp_server_session:unregister_tool(Server, <<"dyn">>),
+    Notif2 = decode_resp(wait_transport_send()),
+    ?assertEqual(<<"notifications/tools/list_changed">>,
+                 maps:get(<<"method">>, Notif2)),
+    gen_statem:stop(Server).
+
+tools_progress_notification_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"slow">>,
+        description => <<"Slow">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, Ctx) ->
+            erlmcp_ctx:report_progress(Ctx, 0.5, <<"halfway">>),
+            {ok, erlmcp:text(<<"done">>)}
+        end
+    }),
+    init_server_with_transport(Server),
+    CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
+        <<"name">> => <<"slow">>,
+        <<"arguments">> => #{},
+        <<"_meta">> => #{<<"progressToken">> => <<"tok">>}
+    }),
+    erlmcp_server_session:send_message(Server, CallReq),
+    ProgressNotif = decode_resp(wait_transport_send()),
+    ?assertEqual(<<"notifications/progress">>,
+                 maps:get(<<"method">>, ProgressNotif)),
+    Params = maps:get(<<"params">>, ProgressNotif),
+    ?assertEqual(<<"tok">>, maps:get(<<"progressToken">>, Params)),
+    _ToolResp = wait_transport_send(),
+    gen_statem:stop(Server).
+
+capability_tools_derived_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"t">>, description => <<"t">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    }),
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, InitReq),
+    Resp = decode_resp(wait_transport_send()),
+    Caps = maps:get(<<"capabilities">>, maps:get(<<"result">>, Resp)),
+    ?assert(maps:is_key(<<"tools">>, Caps)),
+    ?assertEqual(true, maps:get(<<"listChanged">>,
+                                maps:get(<<"tools">>, Caps))),
+    gen_statem:stop(Server).
+
+instructions_generated_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_handler(Server, test_calc_handler),
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, InitReq),
+    Resp = decode_resp(wait_transport_send()),
+    Instructions = maps:get(<<"instructions">>,
+                            maps:get(<<"result">>, Resp)),
+    ?assert(is_binary(Instructions)),
+    ?assert(byte_size(Instructions) > 0),
+    Frozen = erlmcp_server_session:get_instructions(Server),
+    ?assertEqual(Instructions, Frozen),
+    gen_statem:stop(Server).
+
+tools_all_content_types_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"types">>,
+        description => <<"All types">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, _) ->
+            {ok, [
+                erlmcp:text(<<"t">>),
+                erlmcp:image(<<"d">>, <<"image/png">>),
+                erlmcp:audio(<<"d">>, <<"audio/wav">>),
+                erlmcp:embedded_resource(#{<<"uri">> => <<"f:///a">>}),
+                erlmcp:resource_link(<<"f:///b">>, <<"text/plain">>)
+            ]}
+        end
+    }),
+    init_server_with_transport(Server),
+    CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
+        <<"name">> => <<"types">>, <<"arguments">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, CallReq),
+    Resp = decode_resp(wait_transport_send()),
+    Content = maps:get(<<"content">>, maps:get(<<"result">>, Resp)),
+    ?assertEqual(5, length(Content)),
+    gen_statem:stop(Server).
 
 %%====================================================================
 %% Helpers
@@ -350,6 +697,19 @@ init_server() ->
     erlmcp_server_session:send_message(Server, InitReq),
     timer:sleep(50),
     {ok, Server}.
+
+init_server_with_transport(Server) ->
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, InitReq),
+    _ = wait_transport_send(),
+    ok.
+
+decode_resp(Json) ->
+    {ok, Decoded} = erlmcp_codec:decode(Json),
+    Decoded.
 
 wait_transport_send() ->
     receive {send, Data} -> Data after 5000 -> error(transport_send_timeout) end.
