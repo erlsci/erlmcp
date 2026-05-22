@@ -151,17 +151,56 @@ here; the formal scorecard is M5).
 ### M3 — Client + server→client features · **P1**
 *Goal: a symmetric client; the inverted-direction features work.*
 
-- Full `erlmcp_client_session` API: list/read/call/get, subscriptions, progress
-  receipt, cancellation issuance.
-- **Sampling** end-to-end (server-initiated `sampling/createMessage` → client
-  callback), not just client-side dispatch.
-- **Roots** (`roots/list` + `list_changed`) and **elicitation** (`elicitation/create`)
-  as client callback behaviours (`erlmcp_sampling`, `erlmcp_roots`,
-  `erlmcp_elicitation`).
+**Split into M3a + M3b** (2026-05-22): the original single M3 spanned the full
+client request surface (mirroring M2a+M2b) **plus** the three server→client callback
+features and the bidirectional request machinery they need — ~25+ rows, too large
+for the 5-iteration cap (same reasoning as the M2 split). The seam is direction:
+M3a is the client as a *consumer* of the server (client→server); M3b adds the
+*server-initiated* features (server→client) and the symmetric request plumbing.
+M3b depends on M3a.
+
+#### M3a — Client request API
+*Ledger: `milestones/M3a-client-request-api-ledger.md`. Depends on M1 (client_session
+spine) + M2a/M2b (the server surface it consumes).*
+
+- Full `erlmcp_client_session` request API consuming the M2 server: `tools/list` +
+  `tools/call`; `resources/list`/`read`/`templates/list` + subscribe/unsubscribe;
+  `prompts/list`/`get`; `logging/setLevel`; `completion/complete`.
+- **Pagination consumption** (cursor/nextCursor) across the client list calls.
+- **Progress receipt** (inbound `notifications/progress` delivered to the caller)
+  and **cancellation issuance** (client emits `notifications/cancelled`).
+- **Notification receipt:** `notifications/*/list_changed`,
+  `notifications/resources/updated`, `notifications/message`.
+- **Capability gating:** the client only invokes endpoints the server advertised at
+  `initialize`.
+- **One client:** legacy `erlmcp_client` is deleted; `erlmcp_client_session` is the
+  only client (closes the M1 carry-forward + the `cover_excl_mods` `erlmcp_client`
+  entry).
+
+DoD: a client example drives the full request API against an M2 server (same-VM CT);
+Dialyzer clean; CI green.
+
+#### M3b — Server→client features (sampling, roots, elicitation)
+*Ledger: `milestones/M3b-server-to-client-features-ledger.md`. Depends on M3a.*
+
+- **Bidirectional requests:** the server session can *initiate* a request to its
+  bound client (via the `erlmcp_ctx` peer handle, M1-8) and correlate the response;
+  the client session dispatches *inbound* requests to registered callbacks.
+- **Sampling** end-to-end: server-initiated `sampling/createMessage` → client
+  `erlmcp_sampling` callback → result back to the server worker (not just client-side
+  dispatch).
+- **Roots:** inbound `roots/list` → `erlmcp_roots` callback; client emits
+  `notifications/roots/list_changed`.
+- **Elicitation:** inbound `elicitation/create` → `erlmcp_elicitation` callback
+  (accept/decline/cancel).
+- **Client capability advertisement:** the client declares `sampling`/`roots`/
+  `elicitation` at `initialize` only when a handler is registered (mirror of M2a-12,
+  client side). Inbound requests validated at the client boundary (validate-at-edge).
 
 Closes: A (roots, elicitation, full sampling); C (client/server symmetry). DoD:
-client and server in separate VMs complete a sampling + elicitation round-trip;
-conformance client score ≥ rmcp's reference.
+client and server in separate nodes complete a sampling + elicitation round-trip;
+conformance client score ≥ rmcp's reference (harness's client scenarios land here;
+the formal scorecard is M5).
 
 ### M4 — Transports · **P1**
 *Goal: production transports behind the one behaviour.*
