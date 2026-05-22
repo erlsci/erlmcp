@@ -434,3 +434,168 @@ uninitialized_non_response_test() ->
     ?assert(is_process_alive(Client)),
     erlmcp_client_session:stop(Client),
     gen_statem:stop(Server).
+
+%%====================================================================
+%% Cancelled response is dropped (no late result)
+%%====================================================================
+
+cancelled_response_dropped_test() ->
+    {Server, Client} = setup_pair(),
+    ok = erlmcp:add_tool(Server, #{
+        name => <<"delay">>, description => <<"Delay 500ms">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, _) ->
+            timer:sleep(500),
+            {ok, erlmcp:text(<<"late">>)}
+        end
+    }),
+    TestPid = self(),
+    spawn_link(fun() ->
+        Res = erlmcp_client_session:call_tool(Client, <<"delay">>, #{}),
+        TestPid ! {delayed_result, Res}
+    end),
+    timer:sleep(100),
+    lists:foreach(fun(Id) ->
+        erlmcp_client_session:cancel(Client, Id)
+    end, lists:seq(2, 20)),
+    receive {delayed_result, {error, cancelled}} -> ok
+    after 1000 -> ok
+    end,
+    timer:sleep(600),
+    ?assert(is_process_alive(Client)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Unknown response ID is silently ignored
+%%====================================================================
+
+unknown_response_id_test() ->
+    {_Server, Client} = setup_pair(),
+    FakeResp = erlmcp_json_rpc:encode_response(9999, #{<<"ok">> => true}),
+    gen_statem:cast(Client, {transport_data, FakeResp}),
+    timer:sleep(50),
+    ?assert(is_process_alive(Client)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Notifications when owner is undefined
+%%====================================================================
+
+no_owner_notification_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => SBridge,
+        name => <<"test">>, version => <<"1.0">>,
+        capabilities => #{}
+    }),
+    ok = erlmcp:add_tool(Server, #{
+        name => <<"t">>, description => <<"t">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    }),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => CBridge,
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    SBridge ! {peer, Client},
+    CBridge ! {peer, Server},
+    {ok, _} = erlmcp_client_session:initialize(Client, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    ok = erlmcp:add_tool(Server, #{
+        name => <<"tmp">>, description => <<"Tmp">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    }),
+    timer:sleep(100),
+    ?assert(is_process_alive(Client)),
+    erlmcp_client_session:stop(Client),
+    gen_statem:stop(Server).
+
+%%====================================================================
+%% Init response with mismatched ID (catch-all branch)
+%%====================================================================
+
+init_response_mismatch_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => SBridge,
+        owner => self(),
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    FakeResp = erlmcp_json_rpc:encode_response(999, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    gen_statem:cast(Client, {transport_data, FakeResp}),
+    timer:sleep(50),
+    ?assertEqual(uninitialized, gen_statem:call(Client, get_state)),
+    erlmcp_client_session:stop(Client).
+
+init_error_mismatch_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => SBridge,
+        owner => self(),
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    FakeErr = erlmcp_json_rpc:encode_error_response(999, -32600, <<"Bad">>),
+    gen_statem:cast(Client, {transport_data, FakeErr}),
+    timer:sleep(50),
+    ?assertEqual(uninitialized, gen_statem:call(Client, get_state)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Unknown notification method (catch-all is_list_changed false)
+%%====================================================================
+
+unknown_notification_method_test() ->
+    {_Server, Client} = setup_pair(),
+    FakeNotif = erlmcp_json_rpc:encode_notification(<<"custom/event">>, #{<<"x">> => 1}),
+    gen_statem:cast(Client, {transport_data, FakeNotif}),
+    timer:sleep(50),
+    ?assert(is_process_alive(Client)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Progress notification with no matching token
+%%====================================================================
+
+progress_no_matching_token_test() ->
+    {_Server, Client} = setup_pair(),
+    FakeProgress = erlmcp_json_rpc:encode_notification(
+        <<"notifications/progress">>,
+        #{<<"progressToken">> => <<"nonexistent">>, <<"progress">> => 0.5}),
+    gen_statem:cast(Client, {transport_data, FakeProgress}),
+    timer:sleep(50),
+    ?assert(is_process_alive(Client)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Ping error response
+%%====================================================================
+
+ping_error_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => SBridge,
+        name => <<"test">>, version => <<"1.0">>,
+        capabilities => #{}
+    }),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => CBridge,
+        owner => self(),
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    SBridge ! {peer, Client},
+    CBridge ! {peer, Server},
+    {ok, _} = erlmcp_client_session:initialize(Client, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    ok = erlmcp_client_session:ping(Client),
+    erlmcp_client_session:stop(Client),
+    gen_statem:stop(Server).
