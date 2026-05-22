@@ -1,0 +1,436 @@
+-module(erlmcp_client_session_m3a_tests).
+
+-include_lib("eunit/include/eunit.hrl").
+
+%%====================================================================
+%% Bridge — connects client ↔ server in-process
+%%====================================================================
+
+bridge(Peer) ->
+    receive
+        {peer, Pid} -> bridge(Pid);
+        {send, Data} when is_pid(Peer) ->
+            gen_statem:cast(Peer, {transport_data, Data}),
+            bridge(Peer);
+        _ -> bridge(Peer)
+    end.
+
+setup_pair() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => SBridge,
+        name => <<"test-server">>, version => <<"1.0">>,
+        capabilities => #{}
+    }),
+    ok = erlmcp:register_handler(Server, example_calculator_handler),
+    ok = example_weather_handler:register_all(Server),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => CBridge,
+        owner => self(),
+        name => <<"test-client">>, version => <<"1.0">>
+    }),
+    SBridge ! {peer, Client},
+    CBridge ! {peer, Server},
+    {ok, _} = erlmcp_client_session:initialize(Client, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    {Server, Client}.
+
+%%====================================================================
+%% Tools
+%%====================================================================
+
+list_tools_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Tools} = erlmcp_client_session:list_tools(Client),
+    ?assert(length(Tools) >= 5),
+    erlmcp_client_session:stop(Client).
+
+call_tool_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Result} = erlmcp_client_session:call_tool(Client, <<"add">>,
+        #{<<"a">> => 1, <<"b">> => 2}),
+    ?assert(maps:is_key(<<"content">>, Result)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Resources
+%%====================================================================
+
+list_resources_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Resources} = erlmcp_client_session:list_resources(Client),
+    ?assert(length(Resources) >= 1),
+    erlmcp_client_session:stop(Client).
+
+read_resource_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Result} = erlmcp_client_session:read_resource(Client,
+        <<"weather://current/london">>),
+    ?assert(maps:is_key(<<"contents">>, Result)),
+    erlmcp_client_session:stop(Client).
+
+list_resource_templates_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Templates} = erlmcp_client_session:list_resource_templates(Client),
+    ?assert(length(Templates) >= 1),
+    erlmcp_client_session:stop(Client).
+
+read_templated_resource_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Result} = erlmcp_client_session:read_resource(Client,
+        <<"weather://current/tokyo">>),
+    ?assert(maps:is_key(<<"contents">>, Result)),
+    erlmcp_client_session:stop(Client).
+
+subscribe_resource_test() ->
+    {Server, Client} = setup_pair(),
+    ok = erlmcp_client_session:subscribe_resource(Client,
+        <<"weather://current/london">>),
+    erlmcp:notify_resource_updated(Server, <<"weather://current/london">>),
+    receive
+        {mcp_notification, {resource_updated, <<"weather://current/london">>}} -> ok
+    after 2000 -> ?assert(false)
+    end,
+    ok = erlmcp_client_session:unsubscribe_resource(Client,
+        <<"weather://current/london">>),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Prompts
+%%====================================================================
+
+list_prompts_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Prompts} = erlmcp_client_session:list_prompts(Client),
+    ?assert(length(Prompts) >= 1),
+    erlmcp_client_session:stop(Client).
+
+get_prompt_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Result} = erlmcp_client_session:get_prompt(Client,
+        <<"weather_report">>, #{<<"city">> => <<"london">>}),
+    ?assert(maps:is_key(<<"messages">>, Result)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Logging
+%%====================================================================
+
+set_log_level_test() ->
+    {Server, Client} = setup_pair(),
+    ok = erlmcp_client_session:set_log_level(Client, info),
+    erlmcp:log_message(Server, info, <<"test">>, <<"hello">>),
+    receive
+        {mcp_notification, {log_message, Params}} ->
+            ?assertEqual(<<"info">>, maps:get(<<"level">>, Params))
+    after 2000 -> ?assert(false)
+    end,
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Completion
+%%====================================================================
+
+complete_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Result} = erlmcp_client_session:complete(Client,
+        #{<<"type">> => <<"ref/prompt">>, <<"name">> => <<"weather_report">>},
+        #{<<"name">> => <<"city">>, <<"value">> => <<"lon">>}),
+    ?assert(maps:is_key(<<"completion">>, Result)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Capability gating
+%%====================================================================
+
+capability_gating_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => SBridge,
+        name => <<"bare">>, version => <<"1.0">>,
+        capabilities => #{}
+    }),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => CBridge,
+        owner => self(),
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    SBridge ! {peer, Client},
+    CBridge ! {peer, Server},
+    {ok, _} = erlmcp_client_session:initialize(Client, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    ?assertMatch({error, {capability_not_supported, <<"prompts">>}},
+                 erlmcp_client_session:list_prompts(Client)),
+    ?assertMatch({error, {capability_not_supported, <<"tools">>}},
+                 erlmcp_client_session:list_tools(Client)),
+    erlmcp_client_session:stop(Client),
+    gen_statem:stop(Server).
+
+%%====================================================================
+%% Notifications — list_changed
+%%====================================================================
+
+list_changed_test() ->
+    {Server, Client} = setup_pair(),
+    _ = Client,
+    ok = erlmcp:add_tool(Server, #{
+        name => <<"tmp">>, description => <<"Tmp">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    }),
+    receive
+        {mcp_notification, {list_changed, tools, _}} -> ok
+    after 2000 -> ?assert(false)
+    end,
+    ok = erlmcp:remove_tool(Server, <<"tmp">>),
+    receive
+        {mcp_notification, {list_changed, tools, _}} -> ok
+    after 2000 -> ?assert(false)
+    end,
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Ping + cancel
+%%====================================================================
+
+ping_test() ->
+    {_Server, Client} = setup_pair(),
+    ok = erlmcp_client_session:ping(Client),
+    erlmcp_client_session:stop(Client).
+
+cancel_test() ->
+    {_Server, Client} = setup_pair(),
+    ok = erlmcp_client_session:cancel(Client, 999),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Init error
+%%====================================================================
+
+version_negotiation_fail_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => SBridge,
+        name => <<"test">>, version => <<"1.0">>,
+        capabilities => #{}
+    }),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => CBridge,
+        owner => self(),
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    SBridge ! {peer, Client},
+    CBridge ! {peer, Server},
+    ?assertMatch({error, _},
+        erlmcp_client_session:initialize(Client, #{
+            <<"protocolVersion">> => <<"1999-01-01">>,
+            <<"capabilities">> => #{}
+        })),
+    erlmcp_client_session:stop(Client),
+    gen_statem:stop(Server).
+
+get_state_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => SBridge,
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    ?assertEqual(uninitialized, gen_statem:call(Client, get_state)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Single-page list variants (explicit params)
+%%====================================================================
+
+list_tools_with_params_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Result} = erlmcp_client_session:list_tools(Client, #{}),
+    ?assert(maps:is_key(<<"tools">>, Result)),
+    erlmcp_client_session:stop(Client).
+
+list_resources_with_params_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Result} = erlmcp_client_session:list_resources(Client, #{}),
+    ?assert(maps:is_key(<<"resources">>, Result)),
+    erlmcp_client_session:stop(Client).
+
+list_prompts_with_params_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Result} = erlmcp_client_session:list_prompts(Client, #{}),
+    ?assert(maps:is_key(<<"prompts">>, Result)),
+    erlmcp_client_session:stop(Client).
+
+list_resource_templates_with_params_test() ->
+    {_Server, Client} = setup_pair(),
+    {ok, Result} = erlmcp_client_session:list_resource_templates(Client, #{}),
+    ?assert(maps:is_key(<<"resourceTemplates">>, Result)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Tool call with progress token
+%%====================================================================
+
+call_tool_with_progress_token_test() ->
+    {_Server, Client} = setup_pair(),
+    spawn_link(fun() ->
+        erlmcp_client_session:call_tool(Client, <<"add">>,
+            #{<<"a">> => 1, <<"b">> => 2},
+            #{progress_token => <<"tok">>})
+    end),
+    timer:sleep(500),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Cancel with pending request
+%%====================================================================
+
+cancel_pending_request_test() ->
+    {_Server, Client} = setup_pair(),
+    ok = erlmcp:add_tool(_Server, #{
+        name => <<"block">>, description => <<"Block">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, _) -> receive after 10000 -> ok end end
+    }),
+    TestPid = self(),
+    spawn_link(fun() ->
+        Res = erlmcp_client_session:call_tool(Client, <<"block">>, #{}),
+        TestPid ! {blocked_result, Res}
+    end),
+    timer:sleep(200),
+    lists:foreach(fun(Id) ->
+        erlmcp_client_session:cancel(Client, Id)
+    end, lists:seq(2, 20)),
+    receive
+        {blocked_result, {error, cancelled}} -> ok;
+        {blocked_result, _} -> ok
+    after 2000 -> ok
+    end,
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Operational state — get_state
+%%====================================================================
+
+operational_get_state_test() ->
+    {_Server, Client} = setup_pair(),
+    ?assertEqual(operational, gen_statem:call(Client, get_state)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Unknown events in uninitialized
+%%====================================================================
+
+uninitialized_unknown_events_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => SBridge,
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    gen_statem:cast(Client, {transport_data, <<"not json">>}),
+    gen_statem:cast(Client, some_unknown),
+    Client ! some_info,
+    timer:sleep(50),
+    ?assert(is_process_alive(Client)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Unknown events in operational
+%%====================================================================
+
+operational_unknown_events_test() ->
+    {_Server, Client} = setup_pair(),
+    gen_statem:cast(Client, some_unknown),
+    Client ! some_info,
+    timer:sleep(50),
+    ?assert(is_process_alive(Client)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Terminate
+%%====================================================================
+
+terminate_test() ->
+    {_Server, Client} = setup_pair(),
+    Ref = monitor(process, Client),
+    erlmcp_client_session:stop(Client),
+    receive {'DOWN', Ref, process, Client, normal} -> ok
+    after 2000 -> ?assert(false)
+    end.
+
+%%====================================================================
+%% Error responses from server
+%%====================================================================
+
+tool_call_error_test() ->
+    {Server, Client} = setup_pair(),
+    ok = erlmcp:add_tool(Server, #{
+        name => <<"fail">>, description => <<"Fail">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, _) -> {error, -32000, <<"custom error">>} end
+    }),
+    {error, ErrorMap} = erlmcp_client_session:call_tool(Client, <<"fail">>, #{}),
+    ?assertEqual(-32000, maps:get(<<"code">>, ErrorMap)),
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Notifications for resources/prompts list_changed
+%%====================================================================
+
+resources_list_changed_test() ->
+    {Server, Client} = setup_pair(),
+    _ = Client,
+    ok = erlmcp:add_resource(Server, #{
+        uri => <<"tmp://x">>, name => <<"X">>,
+        handler => fun(_) -> {ok, #{<<"uri">> => <<"tmp://x">>, <<"text">> => <<"t">>}} end
+    }),
+    receive
+        {mcp_notification, {list_changed, resources, _}} -> ok
+    after 2000 -> ?assert(false)
+    end,
+    erlmcp_client_session:stop(Client).
+
+prompts_list_changed_test() ->
+    {Server, Client} = setup_pair(),
+    _ = Client,
+    ok = erlmcp:add_prompt(Server, #{
+        name => <<"tmp_p">>, description => <<"Tmp">>,
+        handler => fun(_, _) -> {ok, []} end
+    }),
+    receive
+        {mcp_notification, {list_changed, prompts, _}} -> ok
+    after 2000 -> ?assert(false)
+    end,
+    erlmcp_client_session:stop(Client).
+
+%%====================================================================
+%% Uninitialized transport_data that's valid JSON but not a response
+%%====================================================================
+
+uninitialized_non_response_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => SBridge,
+        name => <<"test">>, version => <<"1.0">>,
+        capabilities => #{}
+    }),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => CBridge,
+        owner => self(),
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    SBridge ! {peer, Client},
+    CBridge ! {peer, Server},
+    Notif = erlmcp_json_rpc:encode_notification(<<"test/notif">>, #{}),
+    gen_statem:cast(Client, {transport_data, Notif}),
+    timer:sleep(50),
+    ?assert(is_process_alive(Client)),
+    erlmcp_client_session:stop(Client),
+    gen_statem:stop(Server).

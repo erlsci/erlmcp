@@ -17,8 +17,8 @@ http_transport_test_() ->
     {foreach,
      fun setup/0,
      fun cleanup/1,
-     [fun f1_no_calling_self/1, fun f2_send_returns_ok/1, fun f3_initialize_end_to_end/1,
-      fun f4_async_response_path/1, fun f5_owner_is_client_pid/1, fun test_binary_url/1,
+     [fun f2_send_returns_ok/1,
+      fun f4_async_response_path/1, fun test_binary_url/1,
       fun test_https_url/1, fun test_get_method/1, fun test_custom_headers/1,
       fun test_http_error_response/1, fun test_request_error/1, fun test_retry_on_500/1,
       fun test_no_retry_on_400/1, fun test_retry_exhaustion/1, fun test_pool_limit/1,
@@ -28,7 +28,7 @@ http_transport_test_() ->
       fun test_handle_cast/1, fun test_terminate_cancels_pending/1, fun test_binary_https_url/1,
       fun test_header_atom_integer_conversion/1, fun test_retry_on_connect_failure/1,
       fun test_retry_cancelled_request/1, fun test_non_json_content_type/1,
-      fun test_retry_on_429/1, fun test_list_opts_wrapper/1, fun test_no_content_type_header/1,
+      fun test_retry_on_429/1, fun test_no_content_type_header/1,
       fun test_retry_on_timeout/1, fun test_no_retry_on_unknown_error/1]}.
 
 setup() ->
@@ -38,22 +38,6 @@ setup() ->
 cleanup(_) ->
     meck:unload(httpc),
     ok.
-
-%%====================================================================
-%% F-1: HTTP initialize no longer raises calling_self
-%%====================================================================
-
-f1_no_calling_self(_) ->
-    {"F-1: HTTP initialize does not crash with calling_self",
-     fun() ->
-        mock_httpc_async_ok(initialize_response(1)),
-        {ok, Client} =
-            erlmcp_client:start_link({http, #{url => "http://localhost:9006/mcp"}}, #{}),
-        Caps = #mcp_client_capabilities{},
-        Result = erlmcp_client:initialize(Client, Caps, #{}),
-        ?assertMatch({ok, _}, Result),
-        erlmcp_client:stop(Client)
-     end}.
 
 %%====================================================================
 %% F-2: send/2 returns ok on successful dispatch
@@ -68,23 +52,6 @@ f2_send_returns_ok(_) ->
         Result = erlmcp_transport_http:send(Pid, <<"test data">>),
         ?assertEqual(ok, Result),
         erlmcp_transport_http:close(Pid)
-     end}.
-
-%%====================================================================
-%% F-3: initialize returns {ok, Map} end-to-end
-%%====================================================================
-
-f3_initialize_end_to_end(_) ->
-    {"F-3: initialize returns {ok, Map} end-to-end",
-     fun() ->
-        mock_httpc_async_ok(initialize_response(1)),
-        {ok, Client} =
-            erlmcp_client:start_link({http, #{url => "http://localhost:9006/mcp"}}, #{}),
-        Caps = #mcp_client_capabilities{},
-        {ok, InitResult} = erlmcp_client:initialize(Client, Caps, #{}),
-        ?assertMatch(#{<<"protocolVersion">> := _}, InitResult),
-        ?assertMatch(#{<<"capabilities">> := _}, InitResult),
-        erlmcp_client:stop(Client)
      end}.
 
 %%====================================================================
@@ -106,21 +73,6 @@ f4_async_response_path(_) ->
             ?assert(false)
         end,
         erlmcp_transport_http:close(Pid)
-     end}.
-
-%%====================================================================
-%% F-5: owner for client's HTTP transport is the client process
-%%====================================================================
-
-f5_owner_is_client_pid(_) ->
-    {"F-5: client receives transport_message without caller-supplied owner",
-     fun() ->
-        mock_httpc_async_ok(initialize_response(1)),
-        {ok, Client} =
-            erlmcp_client:start_link({http, #{url => "http://localhost:9006/mcp"}}, #{}),
-        Caps = #mcp_client_capabilities{},
-        {ok, _} = erlmcp_client:initialize(Client, Caps, #{}),
-        erlmcp_client:stop(Client)
      end}.
 
 %%====================================================================
@@ -743,17 +695,6 @@ test_retry_on_429(_) ->
             ?assert(false)
         end,
         erlmcp_transport_http:close(Pid)
-     end}.
-
-test_list_opts_wrapper(_) ->
-    {"client accepts {http, [MapOpts]} list wrapper",
-     fun() ->
-        mock_httpc_async_ok(initialize_response(1)),
-        {ok, Client} =
-            erlmcp_client:start_link({http, [#{url => "http://localhost:9006/mcp"}]}, #{}),
-        Caps = #mcp_client_capabilities{},
-        {ok, _} = erlmcp_client:initialize(Client, Caps, #{}),
-        erlmcp_client:stop(Client)
      end}.
 
 test_no_content_type_header(_) ->
