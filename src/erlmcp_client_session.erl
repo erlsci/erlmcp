@@ -16,20 +16,28 @@
 -export([set_log_level/2]).
 %% Completion (M3a-7)
 -export([complete/3]).
+%% Callback registration (M3b)
+-export([set_sampling_handler/2, set_roots_handler/2, set_elicitation_handler/2,
+         notify_roots_changed/1]).
 %% gen_statem
 -export([callback_mode/0, init/1, terminate/3]).
 -export([uninitialized/3, operational/3]).
 
 -record(data, {
     transport :: pid(),
-    owner :: pid(),
+    owner :: pid() | undefined,
     client_info :: erlmcp_model:peer_info(),
     server_capabilities :: map() | undefined,
     protocol_version :: binary() | undefined,
     next_id = 1 :: pos_integer(),
     pending = #{} :: #{pos_integer() => {pid(), term()}},
     progress_tokens = #{} :: #{binary() | integer() => pid()},
-    cancelled = #{} :: #{pos_integer() => true}
+    cancelled = #{} :: #{pos_integer() => true},
+    %% M3b: callback handlers + inbound request pending
+    sampling_handler :: module() | undefined,
+    roots_handler :: module() | undefined,
+    elicitation_handler :: module() | undefined,
+    in_pending = #{} :: #{term() => {pid(), reference()}}
 }).
 
 %%====================================================================
@@ -161,6 +169,26 @@ complete(Session, Ref, Argument) ->
             #{<<"ref">> => Ref, <<"argument">> => Argument}).
 
 %%====================================================================
+%% API — callback registration (M3b)
+%%====================================================================
+
+-spec set_sampling_handler(pid(), module()) -> ok.
+set_sampling_handler(Session, Module) when is_pid(Session), is_atom(Module) ->
+    gen_statem:call(Session, {set_handler, sampling, Module}).
+
+-spec set_roots_handler(pid(), module()) -> ok.
+set_roots_handler(Session, Module) when is_pid(Session), is_atom(Module) ->
+    gen_statem:call(Session, {set_handler, roots, Module}).
+
+-spec set_elicitation_handler(pid(), module()) -> ok.
+set_elicitation_handler(Session, Module) when is_pid(Session), is_atom(Module) ->
+    gen_statem:call(Session, {set_handler, elicitation, Module}).
+
+-spec notify_roots_changed(pid()) -> ok.
+notify_roots_changed(Session) when is_pid(Session) ->
+    gen_statem:cast(Session, roots_changed).
+
+%%====================================================================
 %% gen_statem callbacks
 %%====================================================================
 
@@ -188,9 +216,12 @@ uninitialized({call, From}, {initialize, Params}, Data) ->
     {Id, NewData} = next_id(Data),
     ClientVersion = maps:get(<<"protocolVersion">>, Params,
                              hd(erlmcp_capabilities:supported_versions())),
+    DerivedCaps = derive_client_capabilities(NewData),
+    UserCaps = maps:get(<<"capabilities">>, Params, #{}),
+    MergedCaps = maps:merge(UserCaps, DerivedCaps),
     InitParams = #{
         <<"protocolVersion">> => ClientVersion,
-        <<"capabilities">> => maps:get(<<"capabilities">>, Params, #{}),
+        <<"capabilities">> => MergedCaps,
         <<"clientInfo">> => #{
             <<"name">> => erlmcp_model:info_name(Data#data.client_info),
             <<"version">> => erlmcp_model:info_version(Data#data.client_info)
@@ -210,6 +241,8 @@ uninitialized(cast, {transport_data, RawData}, Data) ->
             keep_state_and_data
     end;
 
+uninitialized({call, From}, {set_handler, Type, Module}, Data) ->
+    {keep_state, set_handler_field(Type, Module, Data), [{reply, From, ok}]};
 uninitialized({call, From}, get_state, _Data) ->
     {keep_state_and_data, [{reply, From, uninitialized}]};
 uninitialized(_EventType, _Event, _Data) ->
@@ -256,6 +289,9 @@ operational({call, From}, {cancel, RequestId}, Data) ->
     end,
     {keep_state, NewData, [{reply, From, ok}]};
 
+operational({call, From}, {set_handler, Type, Module}, Data) ->
+    {keep_state, set_handler_field(Type, Module, Data), [{reply, From, ok}]};
+
 operational(cast, {transport_data, RawData}, Data) ->
     case erlmcp_json_rpc:decode_and_classify(RawData) of
         {ok, {response, Id, Result}} ->
@@ -264,9 +300,22 @@ operational(cast, {transport_data, RawData}, Data) ->
             handle_response(Id, {error, Error}, Data);
         {ok, {notification, Method, Params}} ->
             handle_notification(Method, Params, Data);
+        {ok, {request, Id, Method, Params}} ->
+            handle_inbound_request(Id, Method, Params, Data);
         _ ->
             keep_state_and_data
     end;
+
+operational(cast, roots_changed, Data) ->
+    Json = erlmcp_json_rpc:encode_notification(
+               <<"notifications/roots/list_changed">>, #{}),
+    _ = Data#data.transport ! {send, Json},
+    keep_state_and_data;
+
+operational(info, {callback_result, Id, Result}, Data) ->
+    handle_callback_result(Id, Result, Data);
+operational(info, {'DOWN', Ref, process, Pid, Reason}, Data) ->
+    handle_callback_down(Pid, Ref, Reason, Data);
 
 operational({call, From}, get_state, _Data) ->
     {keep_state_and_data, [{reply, From, operational}]};
@@ -277,7 +326,7 @@ terminate(_Reason, _State, _Data) ->
     ok.
 
 %%====================================================================
-%% Response handling
+%% Response handling (outbound requests)
 %%====================================================================
 
 handle_init_response(Id, Result, Data) ->
@@ -331,6 +380,113 @@ handle_response(Id, Result, Data) ->
     end.
 
 %%====================================================================
+%% Inbound request dispatch (server→client, M3b)
+%%====================================================================
+
+handle_inbound_request(Id, Method, Params, Data) ->
+    case find_callback(Method, Data) of
+        {ok, {Type, Mod}} ->
+            case validate_inbound(Method, Params) of
+                ok ->
+                    dispatch_callback(Id, Type, Mod, Params, Data);
+                {error, Reason} ->
+                    send_client_error(Data, Id, -32602, Reason),
+                    keep_state_and_data
+            end;
+        error ->
+            send_client_error(Data, Id, -32601, <<"Method not found">>),
+            keep_state_and_data
+    end.
+
+find_callback(<<"sampling/createMessage">>, #data{sampling_handler = Mod})
+  when Mod =/= undefined -> {ok, {sampling, Mod}};
+find_callback(<<"roots/list">>, #data{roots_handler = Mod})
+  when Mod =/= undefined -> {ok, {roots, Mod}};
+find_callback(<<"elicitation/create">>, #data{elicitation_handler = Mod})
+  when Mod =/= undefined -> {ok, {elicitation, Mod}};
+find_callback(_, _) -> error.
+
+validate_inbound(<<"sampling/createMessage">>, Params) ->
+    case maps:is_key(<<"messages">>, Params) of
+        true -> ok;
+        false -> {error, <<"Missing required field: messages">>}
+    end;
+validate_inbound(_, _) ->
+    ok.
+
+dispatch_callback(Id, sampling, Mod, Params, Data) ->
+    spawn_callback(Id, fun(Ctx) -> Mod:handle_create_message(Params, Ctx) end, Data);
+dispatch_callback(Id, roots, Mod, _Params, Data) ->
+    spawn_callback(Id, fun(Ctx) ->
+        case Mod:list_roots(Ctx) of
+            {ok, Roots} -> {ok, #{<<"roots">> => Roots}};
+            Other -> Other
+        end
+    end, Data);
+dispatch_callback(Id, elicitation, Mod, Params, Data) ->
+    spawn_callback(Id, fun(Ctx) -> Mod:handle_elicit(Params, Ctx) end, Data).
+
+spawn_callback(Id, Fun, Data) ->
+    Session = self(),
+    {Pid, Ref} = spawn_monitor(fun() ->
+        Ctx = erlmcp_ctx:new(#{session => Session, request_id => Id}),
+        Result = Fun(Ctx),
+        Session ! {callback_result, Id, Result}
+    end),
+    InPending = maps:put(Id, {Pid, Ref}, Data#data.in_pending),
+    {keep_state, Data#data{in_pending = InPending}}.
+
+%%====================================================================
+%% Callback result / worker down
+%%====================================================================
+
+handle_callback_result(Id, {ok, Result}, Data) ->
+    case maps:take(Id, Data#data.in_pending) of
+        {{_Pid, Ref}, NewInPending} ->
+            demonitor(Ref, [flush]),
+            send_client_response(Data, Id, Result),
+            {keep_state, Data#data{in_pending = NewInPending}};
+        error ->
+            keep_state_and_data
+    end;
+handle_callback_result(Id, {error, Code, Msg}, Data) ->
+    case maps:take(Id, Data#data.in_pending) of
+        {{_Pid, Ref}, NewInPending} ->
+            demonitor(Ref, [flush]),
+            send_client_error(Data, Id, Code, Msg),
+            {keep_state, Data#data{in_pending = NewInPending}};
+        error ->
+            keep_state_and_data
+    end;
+handle_callback_result(_, _, _) ->
+    keep_state_and_data.
+
+handle_callback_down(Pid, Ref, Reason, Data) ->
+    case find_worker_by_pid(Pid, Data#data.in_pending) of
+        {ok, Id} ->
+            demonitor(Ref, [flush]),
+            NewInPending = maps:remove(Id, Data#data.in_pending),
+            case Reason of
+                normal ->
+                    {keep_state, Data#data{in_pending = NewInPending}};
+                _ ->
+                    send_client_error(Data, Id, -32603, <<"Internal error">>),
+                    {keep_state, Data#data{in_pending = NewInPending}}
+            end;
+        error ->
+            keep_state_and_data
+    end.
+
+find_worker_by_pid(Pid, Pending) ->
+    maps:fold(
+        fun(Id, {P, _Ref}, error) when P =:= Pid -> {ok, Id};
+           (_Id, _Val, Acc) -> Acc
+        end,
+        error,
+        Pending
+    ).
+
+%%====================================================================
 %% Notification handling
 %%====================================================================
 
@@ -367,6 +523,46 @@ is_list_changed(_) -> false.
 notify_owner(Msg, #data{owner = Owner}) when is_pid(Owner) ->
     Owner ! {mcp_notification, Msg};
 notify_owner(_, _) ->
+    ok.
+
+%%====================================================================
+%% Client capability advertisement (M3b-7)
+%%====================================================================
+
+derive_client_capabilities(Data) ->
+    B0 = #{},
+    B1 = case Data#data.sampling_handler of
+        undefined -> B0;
+        _ -> B0#{<<"sampling">> => #{}}
+    end,
+    B2 = case Data#data.roots_handler of
+        undefined -> B1;
+        _ -> B1#{<<"roots">> => #{<<"listChanged">> => true}}
+    end,
+    case Data#data.elicitation_handler of
+        undefined -> B2;
+        _ -> B2#{<<"elicitation">> => #{}}
+    end.
+
+set_handler_field(sampling, Module, Data) ->
+    Data#data{sampling_handler = Module};
+set_handler_field(roots, Module, Data) ->
+    Data#data{roots_handler = Module};
+set_handler_field(elicitation, Module, Data) ->
+    Data#data{elicitation_handler = Module}.
+
+%%====================================================================
+%% Wire helpers
+%%====================================================================
+
+send_client_response(#data{transport = Transport}, Id, Result) ->
+    Json = erlmcp_json_rpc:encode_response(Id, Result),
+    _ = Transport ! {send, Json},
+    ok.
+
+send_client_error(#data{transport = Transport}, Id, Code, Msg) ->
+    Json = erlmcp_json_rpc:encode_error_response(Id, Code, Msg),
+    _ = Transport ! {send, Json},
     ok.
 
 %%====================================================================

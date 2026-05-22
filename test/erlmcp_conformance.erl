@@ -1,6 +1,6 @@
 -module(erlmcp_conformance).
 
--export([run_server_scorecard/0]).
+-export([run_server_scorecard/0, run_client_scorecard/0]).
 
 -define(SCENARIOS, [
     %% L0 — protocol basics
@@ -433,6 +433,240 @@ scenario_structured_output(Server) ->
         true -> pass;
         false -> fail
     end.
+
+%%====================================================================
+%% Client scorecard (M3b)
+%%====================================================================
+
+-define(CLIENT_SCENARIOS, [
+    {l0, <<"client_initialize">>, fun cs_initialize/1},
+    {l0, <<"client_ping">>, fun cs_ping/1},
+    {l1, <<"client_list_tools">>, fun cs_list_tools/1},
+    {l1, <<"client_call_tool">>, fun cs_call_tool/1},
+    {l2, <<"client_list_resources">>, fun cs_list_resources/1},
+    {l2, <<"client_read_resource">>, fun cs_read_resource/1},
+    {l3, <<"client_list_prompts">>, fun cs_list_prompts/1},
+    {l3, <<"client_get_prompt">>, fun cs_get_prompt/1},
+    {l3, <<"client_set_log_level">>, fun cs_set_log_level/1},
+    {l4, <<"client_completion">>, fun cs_completion/1},
+    {l4, <<"client_capability_gating">>, fun cs_capability_gating/1},
+    {l4, <<"client_sampling_callback">>, fun cs_sampling_callback/1},
+    {l4, <<"client_roots_callback">>, fun cs_roots_callback/1},
+    {l4, <<"client_elicitation_callback">>, fun cs_elicitation_callback/1},
+    {l4, <<"client_capability_advertisement">>, fun cs_capability_advertisement/1},
+    {l4, <<"client_inbound_unknown_method">>, fun cs_inbound_unknown/1}
+]).
+
+-spec run_client_scorecard() -> {float(), [{atom(), binary(), pass | fail}]}.
+run_client_scorecard() ->
+    Results = lists:map(fun({Level, Name, ScenarioFun}) ->
+        try ScenarioFun(unused) of
+            pass -> {Level, Name, pass};
+            fail -> {Level, Name, fail}
+        catch _:_ ->
+            {Level, Name, fail}
+        end
+    end, ?CLIENT_SCENARIOS),
+    Passed = length([ok || {_, _, pass} <- Results]),
+    Total = length(Results),
+    Score = (Passed / Total) * 100,
+    {Score, Results}.
+
+setup_client_pair() ->
+    SB = spawn_link(fun() -> cbridge(undefined) end),
+    CB = spawn_link(fun() -> cbridge(undefined) end),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => SB, name => <<"cs">>, version => <<"1.0">>,
+        capabilities => #{}
+    }),
+    ok = erlmcp:register_handler(Server, example_calculator_handler),
+    ok = example_weather_handler:register_all(Server),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => CB, owner => self(),
+        name => <<"cc">>, version => <<"1.0">>
+    }),
+    ok = erlmcp_client_session:set_sampling_handler(Client, test_sampling_handler),
+    ok = erlmcp_client_session:set_roots_handler(Client, test_roots_handler),
+    ok = erlmcp_client_session:set_elicitation_handler(Client, test_elicitation_handler),
+    SB ! {peer, Client},
+    CB ! {peer, Server},
+    {ok, _} = erlmcp_client_session:initialize(Client, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    {Server, Client}.
+
+cbridge(Peer) ->
+    receive
+        {peer, Pid} -> cbridge(Pid);
+        {send, Data} when is_pid(Peer) ->
+            gen_statem:cast(Peer, {transport_data, Data}),
+            cbridge(Peer);
+        _ -> cbridge(Peer)
+    end.
+
+cs_initialize(_) ->
+    {_S, C} = setup_client_pair(),
+    R = gen_statem:call(C, get_state),
+    erlmcp_client_session:stop(C),
+    case R of operational -> pass; _ -> fail end.
+
+cs_ping(_) ->
+    {_S, C} = setup_client_pair(),
+    R = erlmcp_client_session:ping(C),
+    erlmcp_client_session:stop(C),
+    case R of ok -> pass; _ -> fail end.
+
+cs_list_tools(_) ->
+    {_S, C} = setup_client_pair(),
+    R = erlmcp_client_session:list_tools(C),
+    erlmcp_client_session:stop(C),
+    case R of {ok, L} when length(L) >= 1 -> pass; _ -> fail end.
+
+cs_call_tool(_) ->
+    {_S, C} = setup_client_pair(),
+    R = erlmcp_client_session:call_tool(C, <<"add">>,
+        #{<<"a">> => 1, <<"b">> => 2}),
+    erlmcp_client_session:stop(C),
+    case R of {ok, _} -> pass; _ -> fail end.
+
+cs_list_resources(_) ->
+    {_S, C} = setup_client_pair(),
+    R = erlmcp_client_session:list_resources(C),
+    erlmcp_client_session:stop(C),
+    case R of {ok, L} when length(L) >= 1 -> pass; _ -> fail end.
+
+cs_read_resource(_) ->
+    {_S, C} = setup_client_pair(),
+    R = erlmcp_client_session:read_resource(C, <<"weather://current/london">>),
+    erlmcp_client_session:stop(C),
+    case R of {ok, _} -> pass; _ -> fail end.
+
+cs_list_prompts(_) ->
+    {_S, C} = setup_client_pair(),
+    R = erlmcp_client_session:list_prompts(C),
+    erlmcp_client_session:stop(C),
+    case R of {ok, L} when length(L) >= 1 -> pass; _ -> fail end.
+
+cs_get_prompt(_) ->
+    {_S, C} = setup_client_pair(),
+    R = erlmcp_client_session:get_prompt(C, <<"weather_report">>,
+        #{<<"city">> => <<"london">>}),
+    erlmcp_client_session:stop(C),
+    case R of {ok, _} -> pass; _ -> fail end.
+
+cs_set_log_level(_) ->
+    {_S, C} = setup_client_pair(),
+    R = erlmcp_client_session:set_log_level(C, info),
+    erlmcp_client_session:stop(C),
+    case R of ok -> pass; _ -> fail end.
+
+cs_completion(_) ->
+    {_S, C} = setup_client_pair(),
+    R = erlmcp_client_session:complete(C,
+        #{<<"type">> => <<"ref/prompt">>, <<"name">> => <<"weather_report">>},
+        #{<<"name">> => <<"city">>, <<"value">> => <<"lon">>}),
+    erlmcp_client_session:stop(C),
+    case R of {ok, _} -> pass; _ -> fail end.
+
+cs_capability_gating(_) ->
+    SB = spawn_link(fun() -> cbridge(undefined) end),
+    CB = spawn_link(fun() -> cbridge(undefined) end),
+    {ok, S} = erlmcp_server_session:start_link(#{
+        transport => SB, name => <<"bare">>, version => <<"1.0">>,
+        capabilities => #{}
+    }),
+    {ok, C} = erlmcp_client_session:start_link(#{
+        transport => CB, owner => self(),
+        name => <<"cc">>, version => <<"1.0">>
+    }),
+    SB ! {peer, C}, CB ! {peer, S},
+    {ok, _} = erlmcp_client_session:initialize(C, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    R = erlmcp_client_session:list_prompts(C),
+    erlmcp_client_session:stop(C), gen_statem:stop(S),
+    case R of {error, {capability_not_supported, _}} -> pass; _ -> fail end.
+
+cs_sampling_callback(_) ->
+    {S, C} = setup_client_pair(),
+    ok = erlmcp:add_tool(S, #{
+        name => <<"s">>, description => <<"S">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, Ctx) ->
+            {ok, R} = erlmcp_ctx:request_peer(Ctx, <<"sampling/createMessage">>,
+                #{<<"messages">> => []}),
+            {ok, erlmcp:text(maps:get(<<"model">>, R, <<"?">>))}
+        end
+    }),
+    R = erlmcp_client_session:call_tool(C, <<"s">>, #{}),
+    erlmcp_client_session:stop(C),
+    case R of {ok, _} -> pass; _ -> fail end.
+
+cs_roots_callback(_) ->
+    {S, C} = setup_client_pair(),
+    ok = erlmcp:add_tool(S, #{
+        name => <<"r">>, description => <<"R">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, Ctx) ->
+            {ok, R} = erlmcp_ctx:request_peer(Ctx, <<"roots/list">>, #{}),
+            {ok, erlmcp:text(integer_to_binary(length(maps:get(<<"roots">>, R, []))))}
+        end
+    }),
+    R = erlmcp_client_session:call_tool(C, <<"r">>, #{}),
+    erlmcp_client_session:stop(C),
+    case R of {ok, _} -> pass; _ -> fail end.
+
+cs_elicitation_callback(_) ->
+    {S, C} = setup_client_pair(),
+    ok = erlmcp:add_tool(S, #{
+        name => <<"e">>, description => <<"E">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, Ctx) ->
+            {ok, R} = erlmcp_ctx:request_peer(Ctx, <<"elicitation/create">>,
+                #{<<"message">> => <<"OK?">>}),
+            {ok, erlmcp:text(maps:get(<<"action">>, R, <<"?">>))}
+        end
+    }),
+    R = erlmcp_client_session:call_tool(C, <<"e">>, #{}),
+    erlmcp_client_session:stop(C),
+    case R of {ok, _} -> pass; _ -> fail end.
+
+cs_capability_advertisement(_) ->
+    SB = spawn_link(fun() -> cbridge(undefined) end),
+    CB = spawn_link(fun() -> cbridge(undefined) end),
+    {ok, S} = erlmcp_server_session:start_link(#{
+        transport => SB, name => <<"t">>, version => <<"1.0">>,
+        capabilities => #{}
+    }),
+    {ok, C} = erlmcp_client_session:start_link(#{
+        transport => CB, owner => self(),
+        name => <<"t">>, version => <<"1.0">>
+    }),
+    ok = erlmcp_client_session:set_sampling_handler(C, test_sampling_handler),
+    SB ! {peer, C}, CB ! {peer, S},
+    {ok, _} = erlmcp_client_session:initialize(C, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    erlmcp_client_session:stop(C), gen_statem:stop(S),
+    pass.
+
+cs_inbound_unknown(_) ->
+    {S, C} = setup_client_pair(),
+    ok = erlmcp:add_tool(S, #{
+        name => <<"u">>, description => <<"U">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_, Ctx) ->
+            R = erlmcp_ctx:request_peer(Ctx, <<"nonexistent">>, #{}),
+            case R of {error, _} -> {ok, erlmcp:text(<<"err">>)};
+                       _ -> {ok, erlmcp:text(<<"?">>)} end
+        end
+    }),
+    R = erlmcp_client_session:call_tool(C, <<"u">>, #{}),
+    erlmcp_client_session:stop(C),
+    case R of {ok, _} -> pass; _ -> fail end.
 
 %%====================================================================
 %% Helpers

@@ -29,6 +29,8 @@
     pending = #{} :: #{pos_integer() => {pid(), reference()}},
     handlers :: map(),
     tools = #{} :: #{binary() => map()},
+    out_pending = #{} :: #{pos_integer() => {pid(), reference()}},
+    out_next_id = 1 :: pos_integer(),
     resources = #{} :: #{binary() => map()},
     resource_templates = #{} :: #{binary() => map()},
     prompts = #{} :: #{binary() => map()},
@@ -193,6 +195,8 @@ operational(info, {'DOWN', Ref, process, Pid, Reason}, Data) ->
 operational(info, {send_notification, _ReqId, Notification}, Data) ->
     send_raw(Data, Notification),
     keep_state_and_data;
+operational(info, {peer_request, Caller, CallerRef, Method, Params}, Data) ->
+    handle_peer_request(Caller, CallerRef, Method, Params, Data);
 operational({call, From}, Msg, Data) ->
     handle_common_call(From, Msg, operational, Data);
 operational(_EventType, _Event, _Data) ->
@@ -300,6 +304,11 @@ handle_operational_message({request, Id, <<"logging/setLevel">>, Params}, Data) 
 %% Completion
 handle_operational_message({request, Id, <<"completion/complete">>, Params}, Data) ->
     handle_completion_complete(Id, Params, Data);
+%% Outbound response (client responding to server-initiated request)
+handle_operational_message({response, Id, Result}, Data) ->
+    handle_outbound_response(Id, {ok, Result}, Data);
+handle_operational_message({error_response, Id, Error}, Data) ->
+    handle_outbound_response(Id, {error, Error}, Data);
 %% Generic / notifications
 handle_operational_message({request, Id, Method, Params}, Data) ->
     handle_request(Id, Method, Params, Data);
@@ -917,6 +926,29 @@ build_instructions_text(Categories, EntryPoints) ->
 join_bins([H], _) -> H;
 join_bins([H | T], Sep) ->
     lists:foldl(fun(B, Acc) -> <<Acc/binary, Sep/binary, B/binary>> end, H, T).
+
+%%====================================================================
+%% Peer requests (server→client, M3b)
+%%====================================================================
+
+handle_peer_request(Caller, CallerRef, Method, Params, Data) ->
+    {Id, NewData} = out_next_id(Data),
+    Json = erlmcp_json_rpc:encode_request(Id, Method, Params),
+    send_raw(NewData, Json),
+    OutPending = maps:put(Id, {Caller, CallerRef}, NewData#data.out_pending),
+    {keep_state, NewData#data{out_pending = OutPending}}.
+
+handle_outbound_response(Id, Result, Data) ->
+    case maps:take(Id, Data#data.out_pending) of
+        {{Caller, CallerRef}, NewOutPending} ->
+            Caller ! {peer_response, CallerRef, Result},
+            {keep_state, Data#data{out_pending = NewOutPending}};
+        error ->
+            keep_state_and_data
+    end.
+
+out_next_id(#data{out_next_id = Id} = Data) ->
+    {Id, Data#data{out_next_id = Id + 1}}.
 
 %%====================================================================
 %% Worker completion

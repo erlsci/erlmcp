@@ -11,7 +11,8 @@
 -export_type([ctx/0]).
 
 -export([new/1, session/1, transport/1, request_id/1,
-         progress_token/1, meta/1, report_progress/3]).
+         progress_token/1, meta/1, report_progress/3,
+         request_peer/3]).
 
 -spec new(map()) -> ctx().
 new(Opts) when is_map(Opts) ->
@@ -41,6 +42,16 @@ progress_token(Ctx) -> maps:get(progress_token, Ctx, undefined).
 
 -spec meta(ctx()) -> map().
 meta(Ctx) -> maps:get(meta, Ctx, #{}).
+
+-spec request_peer(ctx(), binary(), map()) -> {ok, map()} | {error, term()}.
+request_peer(#{session := Session}, Method, Params) ->
+    Ref = make_ref(),
+    Session ! {peer_request, self(), Ref, Method, Params},
+    receive
+        {peer_response, Ref, Result} -> Result
+    after 30000 ->
+        {error, timeout}
+    end.
 
 -spec report_progress(ctx(), float(), binary()) -> ok.
 report_progress(#{session := Session, request_id := ReqId} = Ctx, Fraction, Msg) ->
