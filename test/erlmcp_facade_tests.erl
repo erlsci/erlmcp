@@ -139,13 +139,92 @@ start_transport_unsupported_test() ->
                  erlmcp:start_transport(t, tcp)).
 
 %%====================================================================
-%% Stubs that return not_implemented
+%% Resources (M2b)
 %%====================================================================
 
-add_resource_stub_test() ->
-    ?assertEqual({error, not_implemented}, erlmcp:add_resource(x, <<"u">>, fun() -> ok end)),
-    ?assertEqual({error, not_implemented}, erlmcp:add_resource(x, <<"u">>, <<"n">>, fun() -> ok end)).
+add_resource_test() ->
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp:add_resource(Server, #{
+        uri => <<"test://a">>,
+        name => <<"Test A">>,
+        handler => fun(_Ctx) -> {ok, #{<<"uri">> => <<"test://a">>, <<"text">> => <<"hello">>}} end
+    }),
+    [R] = erlmcp_server_session:list_resources(Server),
+    ?assertEqual(<<"test://a">>, maps:get(uri, R)),
+    ok = erlmcp:remove_resource(Server, <<"test://a">>),
+    ?assertEqual([], erlmcp_server_session:list_resources(Server)),
+    gen_statem:stop(Server).
 
-add_prompt_stub_test() ->
-    ?assertEqual({error, not_implemented}, erlmcp:add_prompt(x, <<"p">>, fun() -> ok end)),
-    ?assertEqual({error, not_implemented}, erlmcp:add_prompt(x, <<"p">>, fun() -> ok end, [])).
+add_resource_template_test() ->
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp:add_resource_template(Server, #{
+        uri_template => <<"test://{id}">>,
+        name => <<"Test">>,
+        handler => fun(_Params, _Ctx) -> {ok, #{<<"uri">> => <<"test://1">>, <<"text">> => <<"ok">>}} end
+    }),
+    [T] = erlmcp_server_session:list_resource_templates(Server),
+    ?assertEqual(<<"test://{id}">>, maps:get(uri_template, T)),
+    ok = erlmcp:remove_resource_template(Server, <<"test://{id}">>),
+    ?assertEqual([], erlmcp_server_session:list_resource_templates(Server)),
+    gen_statem:stop(Server).
+
+%%====================================================================
+%% Prompts (M2b)
+%%====================================================================
+
+add_prompt_test() ->
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp:add_prompt(Server, #{
+        name => <<"greet">>,
+        description => <<"Greeting prompt">>,
+        arguments => [#{name => <<"name">>, required => true}],
+        handler => fun(#{<<"name">> := N}, _Ctx) ->
+            {ok, [#{<<"role">> => <<"user">>, <<"content">> =>
+                #{<<"type">> => <<"text">>, <<"text">> => <<"Hello ", N/binary>>}}]}
+        end
+    }),
+    [P] = erlmcp_server_session:list_prompts(Server),
+    ?assertEqual(<<"greet">>, maps:get(name, P)),
+    ok = erlmcp:remove_prompt(Server, <<"greet">>),
+    ?assertEqual([], erlmcp_server_session:list_prompts(Server)),
+    gen_statem:stop(Server).
+
+%%====================================================================
+%% Logging (M2b)
+%%====================================================================
+
+log_message_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    init_server_with_transport(Server),
+    ok = erlmcp_server_session:set_log_level(Server, info),
+    erlmcp:log_message(Server, info, <<"test">>, <<"hello">>),
+    Notif = decode_resp(wait_transport_send()),
+    ?assertEqual(<<"notifications/message">>, maps:get(<<"method">>, Notif)),
+    Params = maps:get(<<"params">>, Notif),
+    ?assertEqual(<<"info">>, maps:get(<<"level">>, Params)),
+    gen_statem:stop(Server).
+
+init_server_with_transport(Server) ->
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, InitReq),
+    _ = wait_transport_send(),
+    ok.
+
+decode_resp(Json) ->
+    {ok, D} = erlmcp_codec:decode(Json), D.
+
+wait_transport_send() ->
+    receive {send, Data} -> Data after 5000 -> error(transport_send_timeout) end.

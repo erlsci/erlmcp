@@ -14,8 +14,14 @@
 -export([text/1, image/2, audio/2, embedded_resource/1, resource_link/2]).
 %% Discoverability (M2a)
 -export([make_directory_tool/0, conformance_tools/1]).
-%% Server operations API (M2b stubs)
--export([add_resource/3, add_resource/4, add_prompt/3, add_prompt/4]).
+%% Resources (M2b)
+-export([add_resource/2, remove_resource/2,
+         add_resource_template/2, remove_resource_template/2,
+         notify_resource_updated/2]).
+%% Prompts (M2b)
+-export([add_prompt/2, remove_prompt/2]).
+%% Logging (M2b)
+-export([log_message/4]).
 
 %% Types
 -type server_id() :: atom().
@@ -26,9 +32,12 @@
 -type tool_result() :: {ok, [content()]} | {ok, content()} | {error, integer(), binary()}.
 -type content() :: map().
 -type ctx() :: erlmcp_ctx:ctx().
+-type resource_spec() :: map().
+-type prompt_spec() :: map().
 
 -export_type([server_id/0, transport_id/0, transport_type/0,
-              tool_spec/0, tool_result/0, content/0, ctx/0]).
+              tool_spec/0, tool_result/0, content/0, ctx/0,
+              resource_spec/0, prompt_spec/0]).
 
 %%====================================================================
 %% Server management — uses new session model
@@ -209,22 +218,46 @@ group_by_category(Tools) ->
     end, #{}, Tools).
 
 %%====================================================================
-%% Server operations — stubs for M2b
+%% Resources (M2b)
 %%====================================================================
 
--spec add_resource(server_id(), binary(), fun()) -> ok | {error, term()}.
-add_resource(_ServerId, _Uri, _Handler) ->
-    {error, not_implemented}.
+-spec add_resource(pid(), resource_spec()) -> ok.
+add_resource(Session, Spec) when is_pid(Session), is_map(Spec) ->
+    erlmcp_server_session:register_resource(Session, Spec).
 
--spec add_resource(server_id(), binary(), binary(), fun()) -> ok | {error, term()}.
-add_resource(_ServerId, _Uri, _Name, _Handler) ->
-    {error, not_implemented}.
+-spec remove_resource(pid(), binary()) -> ok.
+remove_resource(Session, Uri) when is_pid(Session), is_binary(Uri) ->
+    erlmcp_server_session:unregister_resource(Session, Uri).
 
--spec add_prompt(server_id(), binary(), fun()) -> ok | {error, term()}.
-add_prompt(_ServerId, _Name, _Handler) ->
-    {error, not_implemented}.
+-spec add_resource_template(pid(), resource_spec()) -> ok.
+add_resource_template(Session, Spec) when is_pid(Session), is_map(Spec) ->
+    erlmcp_server_session:register_resource_template(Session, Spec).
 
--spec add_prompt(server_id(), binary(), fun(), [map()]) -> ok | {error, term()}.
-add_prompt(_ServerId, _Name, _Handler, _Args) ->
-    {error, not_implemented}.
+-spec remove_resource_template(pid(), binary()) -> ok.
+remove_resource_template(Session, UriTemplate) when is_pid(Session), is_binary(UriTemplate) ->
+    erlmcp_server_session:unregister_resource_template(Session, UriTemplate).
+
+-spec notify_resource_updated(pid(), binary()) -> ok.
+notify_resource_updated(Session, Uri) when is_pid(Session), is_binary(Uri) ->
+    erlmcp_server_session:notify_resource_updated(Session, Uri).
+
+%%====================================================================
+%% Prompts (M2b)
+%%====================================================================
+
+-spec add_prompt(pid(), prompt_spec()) -> ok.
+add_prompt(Session, Spec) when is_pid(Session), is_map(Spec) ->
+    erlmcp_server_session:register_prompt(Session, Spec).
+
+-spec remove_prompt(pid(), binary()) -> ok.
+remove_prompt(Session, Name) when is_pid(Session), is_binary(Name) ->
+    erlmcp_server_session:unregister_prompt(Session, Name).
+
+%%====================================================================
+%% Logging (M2b)
+%%====================================================================
+
+-spec log_message(pid(), atom(), binary(), term()) -> ok.
+log_message(Session, Level, Logger, Data) when is_pid(Session), is_atom(Level) ->
+    erlmcp_server_session:emit_log(Session, Level, Logger, Data).
 
