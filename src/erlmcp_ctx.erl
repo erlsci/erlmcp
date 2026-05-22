@@ -15,9 +15,17 @@
 
 -spec new(map()) -> ctx().
 new(Opts) when is_map(Opts) ->
-    #{session => maps:get(session, Opts),
-      transport => maps:get(transport, Opts, undefined),
-      request_id => maps:get(request_id, Opts)}.
+    Base = #{session => maps:get(session, Opts),
+             transport => maps:get(transport, Opts, undefined),
+             request_id => maps:get(request_id, Opts)},
+    maybe_add(progress_token, Opts,
+    maybe_add(meta, Opts, Base)).
+
+maybe_add(Key, Opts, Acc) ->
+    case maps:get(Key, Opts, undefined) of
+        undefined -> Acc;
+        Value -> Acc#{Key => Value}
+    end.
 
 -spec session(ctx()) -> pid().
 session(#{session := Pid}) -> Pid.

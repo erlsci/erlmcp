@@ -8,24 +8,27 @@
 -export([start_server/1, start_server/2, stop_server/1, list_servers/0,
          start_transport/2, start_transport/3, stop_transport/1,
          list_transports/0, bind_transport_to_server/2, unbind_transport/1]).
-%% Server operations API (M2)
--export([add_resource/3, add_resource/4, add_tool/3, add_tool/4,
-         add_prompt/3, add_prompt/4]).
-%% Configuration API
--export([get_server_config/1, update_server_config/2,
-         get_transport_config/1, update_transport_config/2]).
-%% Legacy compatibility (removed)
--export([start_stdio_server/0, start_stdio_server/1, stop_stdio_server/0]).
-%% Convenience functions (removed)
--export([start_stdio_setup/2, start_tcp_setup/3, setup_server_components/2,
-         quick_stdio_server/3]).
+%% Tool API (M2a)
+-export([add_tool/2, remove_tool/2, register_handler/2]).
+%% Content constructors (M2a)
+-export([text/1, image/2, audio/2, embedded_resource/1, resource_link/2]).
+%% Discoverability (M2a)
+-export([make_directory_tool/0, conformance_tools/1]).
+%% Server operations API (M2b stubs)
+-export([add_resource/3, add_resource/4, add_prompt/3, add_prompt/4]).
 
 %% Types
 -type server_id() :: atom().
 -type transport_id() :: atom().
 -type transport_type() :: stdio | tcp | http.
 
--export_type([server_id/0, transport_id/0, transport_type/0]).
+-type tool_spec() :: map().
+-type tool_result() :: {ok, [content()]} | {ok, content()} | {error, integer(), binary()}.
+-type content() :: map().
+-type ctx() :: erlmcp_ctx:ctx().
+
+-export_type([server_id/0, transport_id/0, transport_type/0,
+              tool_spec/0, tool_result/0, content/0, ctx/0]).
 
 %%====================================================================
 %% Server management — uses new session model
@@ -121,7 +124,92 @@ unbind_transport(TransportId) ->
     end.
 
 %%====================================================================
-%% Server operations — stubs for M2
+%% Tool API (M2a)
+%%====================================================================
+
+-spec add_tool(pid(), tool_spec()) -> ok | {error, term()}.
+add_tool(Session, ToolSpec) when is_pid(Session), is_map(ToolSpec) ->
+    erlmcp_server_session:register_tool(Session, ToolSpec).
+
+-spec remove_tool(pid(), binary()) -> ok.
+remove_tool(Session, ToolName) when is_pid(Session), is_binary(ToolName) ->
+    erlmcp_server_session:unregister_tool(Session, ToolName).
+
+-spec register_handler(pid(), module()) -> ok.
+register_handler(Session, Module) when is_pid(Session), is_atom(Module) ->
+    erlmcp_server_session:register_handler(Session, Module).
+
+%%====================================================================
+%% Content constructors (M2a)
+%%====================================================================
+
+-spec text(binary()) -> content().
+text(Text) when is_binary(Text) ->
+    #{<<"type">> => <<"text">>, <<"text">> => Text}.
+
+-spec image(binary(), binary()) -> content().
+image(Data, MimeType) when is_binary(Data), is_binary(MimeType) ->
+    #{<<"type">> => <<"image">>, <<"data">> => Data, <<"mimeType">> => MimeType}.
+
+-spec audio(binary(), binary()) -> content().
+audio(Data, MimeType) when is_binary(Data), is_binary(MimeType) ->
+    #{<<"type">> => <<"audio">>, <<"data">> => Data, <<"mimeType">> => MimeType}.
+
+-spec embedded_resource(map()) -> content().
+embedded_resource(Resource) when is_map(Resource) ->
+    #{<<"type">> => <<"resource">>, <<"resource">> => Resource}.
+
+-spec resource_link(binary(), binary()) -> content().
+resource_link(Uri, MimeType) when is_binary(Uri), is_binary(MimeType) ->
+    #{<<"type">> => <<"resource_link">>, <<"uri">> => Uri, <<"mimeType">> => MimeType}.
+
+%%====================================================================
+%% Discoverability (M2a)
+%%====================================================================
+
+-spec make_directory_tool() -> tool_spec().
+make_directory_tool() ->
+    #{
+        name => <<"directory">>,
+        description => <<"Returns a categorized listing of all available tools">>,
+        input_schema => erlmcp_schema:object([]),
+        category => <<"meta">>,
+        when_to_use => <<"When you need an overview of all available tools">>,
+        is_directory => true,
+        handler => fun directory_handler/2
+    }.
+
+-spec conformance_tools(pid()) -> [tool_spec()].
+conformance_tools(Session) ->
+    AllTools = erlmcp_server_session:list_tools(Session),
+    [T || T <- AllTools, maps:get(is_directory, T, false) =/= true].
+
+directory_handler(_Args, Ctx) ->
+    Session = erlmcp_ctx:session(Ctx),
+    AllTools = erlmcp_server_session:list_tools(Session),
+    Tools = [T || T <- AllTools, maps:get(is_directory, T, false) =/= true],
+    Categorized = group_by_category(Tools),
+    Entries = maps:fold(fun(Cat, CatTools, Acc) ->
+        ToolEntries = [#{
+            <<"name">> => maps:get(name, T),
+            <<"description">> => maps:get(description, T, <<>>),
+            <<"when_to_use">> => maps:get(when_to_use, T, <<>>),
+            <<"next">> => maps:get(next, T, [])
+        } || T <- CatTools],
+        Acc#{Cat => ToolEntries}
+    end, #{}, Categorized),
+    {ok, Payload} = erlmcp_codec:encode(Entries),
+    {ok, text(Payload)}.
+
+group_by_category(Tools) ->
+    lists:foldl(fun(T, Acc) ->
+        Cat = maps:get(category, T, <<"uncategorized">>),
+        Existing = maps:get(Cat, Acc, []),
+        Acc#{Cat => Existing ++ [T]}
+    end, #{}, Tools).
+
+%%====================================================================
+%% Server operations — stubs for M2b
 %%====================================================================
 
 -spec add_resource(server_id(), binary(), fun()) -> ok | {error, term()}.
@@ -132,14 +220,6 @@ add_resource(_ServerId, _Uri, _Handler) ->
 add_resource(_ServerId, _Uri, _Name, _Handler) ->
     {error, not_implemented}.
 
--spec add_tool(server_id(), binary(), fun()) -> ok | {error, term()}.
-add_tool(_ServerId, _Name, _Handler) ->
-    {error, not_implemented}.
-
--spec add_tool(server_id(), binary(), fun(), map()) -> ok | {error, term()}.
-add_tool(_ServerId, _Name, _Handler, _Schema) ->
-    {error, not_implemented}.
-
 -spec add_prompt(server_id(), binary(), fun()) -> ok | {error, term()}.
 add_prompt(_ServerId, _Name, _Handler) ->
     {error, not_implemented}.
@@ -148,47 +228,3 @@ add_prompt(_ServerId, _Name, _Handler) ->
 add_prompt(_ServerId, _Name, _Handler, _Args) ->
     {error, not_implemented}.
 
-%%====================================================================
-%% Configuration — stubs for M2
-%%====================================================================
-
--spec get_server_config(server_id()) -> {ok, map()} | {error, term()}.
-get_server_config(_ServerId) -> {error, not_implemented}.
-
--spec update_server_config(server_id(), map()) -> ok | {error, term()}.
-update_server_config(_ServerId, _Config) -> {error, not_implemented}.
-
--spec get_transport_config(transport_id()) -> {ok, map()} | {error, term()}.
-get_transport_config(_TransportId) -> {error, not_implemented}.
-
--spec update_transport_config(transport_id(), map()) -> ok | {error, term()}.
-update_transport_config(_TransportId, _Config) -> {error, not_implemented}.
-
-%%====================================================================
-%% Legacy stdio — removed (use start_server + start_transport)
-%%====================================================================
-
--spec start_stdio_server() -> {ok, pid()} | {error, term()}.
-start_stdio_server() -> {error, removed}.
-
--spec start_stdio_server(map()) -> {ok, pid()} | {error, term()}.
-start_stdio_server(_Options) -> {error, removed}.
-
--spec stop_stdio_server() -> ok | {error, term()}.
-stop_stdio_server() -> {error, removed}.
-
-%%====================================================================
-%% Convenience — stubs
-%%====================================================================
-
--spec start_stdio_setup(server_id(), map()) -> {ok, map()} | {error, term()}.
-start_stdio_setup(_ServerId, _Config) -> {error, not_implemented}.
-
--spec start_tcp_setup(server_id(), map(), map()) -> {ok, map()} | {error, term()}.
-start_tcp_setup(_ServerId, _ServerConfig, _TcpConfig) -> {error, not_implemented}.
-
--spec setup_server_components(pid(), map()) -> ok | {error, term()}.
-setup_server_components(_ServerPid, _Config) -> {error, not_implemented}.
-
--spec quick_stdio_server(binary(), map(), [map()]) -> {ok, map()} | {error, term()}.
-quick_stdio_server(_Name, _Caps, _Tools) -> {error, not_implemented}.
