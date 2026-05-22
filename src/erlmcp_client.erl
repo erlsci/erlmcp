@@ -5,15 +5,6 @@
 -include("erlmcp.hrl").
 
 %% Private records (relocated from include/erlmcp.hrl in M1-3)
--record(json_rpc_response, {
-    id :: json_rpc_id(),
-    result :: term() | undefined,
-    error :: map() | undefined
-}).
--record(json_rpc_notification, {
-    method :: binary(),
-    params :: json_rpc_params()
-}).
 -record(mcp_capability, {enabled = false :: boolean()}).
 -record(mcp_client_capabilities, {
     roots :: #mcp_capability{} | undefined,
@@ -347,15 +338,12 @@ handle_info({transport_data, Data}, State) ->
     handle_info({transport_message, Data}, State);
 
 handle_info({transport_message, Data}, State) ->
-    case erlmcp_json_rpc:decode_message(Data) of
-        {ok,
-         #json_rpc_response{id = Id,
-                            result = Result,
-                            error = undefined}} ->
+    case erlmcp_json_rpc:decode_and_classify(Data) of
+        {ok, {response, Id, Result}} ->
             handle_response(Id, {ok, Result}, State);
-        {ok, #json_rpc_response{id = Id, error = Error}} ->
+        {ok, {error_response, Id, Error}} ->
             handle_response(Id, {error, Error}, State);
-        {ok, #json_rpc_notification{method = Method, params = Params}} ->
+        {ok, {notification, Method, Params}} ->
             handle_notification(Method, Params, State);
         {error, Reason} ->
             logger:error("Failed to decode message: ~p", [Reason]),

@@ -42,7 +42,7 @@ decode_invalid_json_test() ->
 
 decode_non_object_test() ->
     ?assertMatch({error, {invalid_json, not_object}},
-                 erlmcp_json_rpc:decode_message(<<"[1,2,3]">>)).
+                 erlmcp_json_rpc:decode_and_classify(<<"[1,2,3]">>)).
 
 encode_notification_test() ->
     Json = erlmcp_json_rpc:encode_notification(<<"notifications/progress">>,

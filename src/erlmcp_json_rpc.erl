@@ -5,7 +5,7 @@
 %% API exports
 -export([encode_request/3, encode_response/2, encode_error_response/3,
          encode_notification/2, encode_batch/1,
-         decode_message/1, decode_and_classify/1, decode_and_classify_any/1,
+         decode_and_classify/1, decode_and_classify_any/1,
          create_error/3]).
 
 %% Error code constants
