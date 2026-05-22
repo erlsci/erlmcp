@@ -3,6 +3,13 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -include("erlmcp.hrl").
+-record(mcp_capability, {enabled = false :: boolean()}).
+-record(mcp_server_capabilities, {
+    resources :: term(),
+    tools :: term(),
+    prompts :: term(),
+    logging :: term()
+}).
 
 %%====================================================================
 %% Test Setup and Cleanup

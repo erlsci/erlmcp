@@ -60,7 +60,7 @@ uninitialized(cast, {transport_data, RawData}, Data) ->
         {ok, Classified} ->
             handle_uninitialized_message(Classified, Data);
         {error, _Reason} ->
-            send_error(Data, null, -32700, <<"Parse error">>),
+            send_error(Data, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
             keep_state_and_data
     end;
 uninitialized({call, From}, get_state, _Data) ->
@@ -88,7 +88,7 @@ operational(cast, {transport_data, RawData}, Data) ->
         {ok, Classified} ->
             handle_operational_message(Classified, Data);
         {error, _Reason} ->
-            send_error(Data, null, -32700, <<"Parse error">>),
+            send_error(Data, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
             keep_state_and_data
     end;
 operational(info, {worker_result, Id, Result}, Data) ->
@@ -120,7 +120,7 @@ terminate(_Reason, _State, _Data) ->
 handle_uninitialized_message({request, Id, <<"initialize">>, Params}, Data) ->
     handle_initialize(Id, Params, Data);
 handle_uninitialized_message({request, Id, _Method, _Params}, Data) ->
-    send_error(Data, Id, -32002, <<"Server not initialized">>),
+    send_error(Data, Id, erlmcp_json_rpc:invalid_request(), <<"Server not initialized">>),
     keep_state_and_data;
 handle_uninitialized_message(_, _Data) ->
     keep_state_and_data.
@@ -162,7 +162,7 @@ handle_initialize(Id, Params, Data) ->
             send_response(Data, Id, Result),
             {next_state, operational, Data#data{protocol_version = Version}};
         {error, no_common_version} ->
-            send_error(Data, Id, -32602, <<"Unsupported protocol version">>),
+            send_error(Data, Id, erlmcp_json_rpc:invalid_params(), <<"Unsupported protocol version">>),
             keep_state_and_data
     end.
 
@@ -233,7 +233,7 @@ handle_worker_down(Pid, Ref, Reason, Data) ->
                 cancelled ->
                     {keep_state, Data#data{pending = NewPending}};
                 _ ->
-                    send_error(Data, Id, -32603, <<"Internal error">>),
+                    send_error(Data, Id, erlmcp_json_rpc:internal_error(), <<"Internal error">>),
                     {keep_state, Data#data{pending = NewPending}}
             end;
         error ->
@@ -247,7 +247,7 @@ handle_worker_down(Pid, Ref, Reason, Data) ->
 dispatch_request(Method, Params, Handlers, _Ctx) ->
     case maps:get(Method, Handlers, undefined) of
         undefined ->
-            {error, -32601, <<"Method not found">>};
+            {error, erlmcp_json_rpc:method_not_found(), <<"Method not found">>};
         Handler when is_function(Handler, 2) ->
             Handler(Params, _Ctx);
         {Mod, Fun} ->

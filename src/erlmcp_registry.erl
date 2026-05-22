@@ -4,6 +4,15 @@
 
 -include("erlmcp.hrl").
 
+%% Private records (relocated from include/erlmcp.hrl in M1-3)
+-record(mcp_capability, {enabled = false :: boolean()}).
+-record(mcp_server_capabilities, {
+    resources :: #mcp_capability{} | undefined,
+    tools :: #mcp_capability{} | undefined,
+    prompts :: #mcp_capability{} | undefined,
+    logging :: #mcp_capability{} | undefined
+}).
+
 %% API exports
 -export([start_link/0, register_server/3, register_transport/3, unregister_server/1,
          unregister_transport/1, find_server/1,

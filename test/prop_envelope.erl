@@ -95,6 +95,34 @@ prop_codec_roundtrip() ->
                 Decoded =:= Term
             end).
 
+prop_batch_roundtrip() ->
+    ?FORALL(Messages, non_empty(list(oneof([
+                {request, json_rpc_id(), method(), json_map()},
+                {notification, method(), json_map()}
+            ]))),
+            begin
+                Encoded = lists:map(fun
+                    ({request, Id, M, P}) -> erlmcp_json_rpc:encode_request(Id, M, P);
+                    ({notification, M, P}) -> erlmcp_json_rpc:encode_notification(M, P)
+                end, Messages),
+                Batch = erlmcp_json_rpc:encode_batch(Encoded),
+                case erlmcp_json_rpc:decode_and_classify_any(Batch) of
+                    {ok, {batch, Items}} ->
+                        length(Items) =:= length(Messages);
+                    _ ->
+                        false
+                end
+            end).
+
+prop_malformed_batch_degrades() ->
+    ?FORALL(Junk, binary(),
+            begin
+                case erlmcp_json_rpc:decode_and_classify_any(Junk) of
+                    {ok, _} -> true;
+                    {error, _} -> true
+                end
+            end).
+
 %%====================================================================
 %% EUnit wrappers (so rebar3 eunit also runs them)
 %%====================================================================
@@ -110,6 +138,12 @@ envelope_error_response_roundtrip_test() ->
 
 envelope_notification_roundtrip_test() ->
     ?assert(proper:quickcheck(prop_notification_roundtrip(), [quiet, {numtests, 100}])).
+
+envelope_batch_roundtrip_test() ->
+    ?assert(proper:quickcheck(prop_batch_roundtrip(), [quiet, {numtests, 100}])).
+
+envelope_malformed_batch_degrades_test() ->
+    ?assert(proper:quickcheck(prop_malformed_batch_degrades(), [quiet, {numtests, 100}])).
 
 envelope_codec_roundtrip_test() ->
     ?assert(proper:quickcheck(prop_codec_roundtrip(), [quiet, {numtests, 100}])).

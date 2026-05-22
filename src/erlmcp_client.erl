@@ -4,6 +4,29 @@
 
 -include("erlmcp.hrl").
 
+%% Private records (relocated from include/erlmcp.hrl in M1-3)
+-record(json_rpc_response, {
+    id :: json_rpc_id(),
+    result :: term() | undefined,
+    error :: map() | undefined
+}).
+-record(json_rpc_notification, {
+    method :: binary(),
+    params :: json_rpc_params()
+}).
+-record(mcp_capability, {enabled = false :: boolean()}).
+-record(mcp_client_capabilities, {
+    roots :: #mcp_capability{} | undefined,
+    sampling :: #mcp_capability{} | undefined,
+    experimental :: map() | undefined
+}).
+-record(mcp_server_capabilities, {
+    resources :: #mcp_capability{} | undefined,
+    tools :: #mcp_capability{} | undefined,
+    prompts :: #mcp_capability{} | undefined,
+    logging :: #mcp_capability{} | undefined
+}).
+
 %% API exports
 -export([start_link/1, start_link/2, initialize/2, initialize/3, list_roots/1,
          list_resources/1, list_resource_templates/1, read_resource/2, subscribe_to_resource/2,
