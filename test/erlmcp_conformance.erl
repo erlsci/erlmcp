@@ -346,7 +346,8 @@ scenario_capabilities_derived(_Server) ->
     case maps:is_key(<<"tools">>, Caps)
          andalso maps:is_key(<<"resources">>, Caps)
          andalso maps:is_key(<<"prompts">>, Caps)
-         andalso maps:is_key(<<"logging">>, Caps) of
+         andalso maps:is_key(<<"logging">>, Caps)
+         andalso maps:is_key(<<"completions">>, Caps) of
         true -> pass;
         false -> fail
     end.

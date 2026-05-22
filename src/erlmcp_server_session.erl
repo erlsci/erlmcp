@@ -875,7 +875,7 @@ derive_capabilities(Data) ->
         0 -> B2;
         _ -> B2#{<<"prompts">> => #{<<"listChanged">> => true}}
     end,
-    B3#{<<"logging">> => #{}}.
+    B3#{<<"logging">> => #{}, <<"completions">> => #{}}.
 
 generate_instructions(Data) ->
     Tools = [T || T <- maps:values(Data#data.tools),
