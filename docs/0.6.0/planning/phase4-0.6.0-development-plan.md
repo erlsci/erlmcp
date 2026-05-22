@@ -222,6 +222,17 @@ the formal scorecard is M5).
   `erlmcp_transport_stdio` and `_tcp` up to this same shape (pid-based, owner/session-direct
   delivery), **not** to revert http. Its meck-mocked test suite (`erlmcp_transport_http_tests.erl`)
   is the template for the per-transport suites.
+- **Unify the transport↔session contract.** Today the transports diverge: the
+  session consumes `gen_statem:cast(Session, {transport_data, Data})`, but `stdio`
+  raw-sends `Session ! {transport_data, _}` and `http` sends `Owner ! {transport_message, _}`
+  (different tag). M4 standardizes one inbound contract (one tag, one delivery
+  mechanism) so the session is genuinely transport-agnostic, and one outbound path
+  via the behaviour `send/2`.
+- **Coverage re-homed here (from the M2b close):** the registry and supervision tree
+  — `erlmcp_registry` (discovery-only, M1-13) and the supervisors (`erlmcp_app`,
+  `erlmcp_sup`, `erlmcp_server_sup`, `erlmcp_session_sup`, `erlmcp_transport_sup`) —
+  leave `cover_excl_mods` with tests, since M4 is where the supervised system runs
+  end to end over real transports. After M4 only the M6 task modules remain excluded.
 
 Closes: C (transport behaviour fully realized). DoD: the same example server runs
 unchanged over stdio, TCP, and streamable HTTP; transport conformance scenarios pass.
