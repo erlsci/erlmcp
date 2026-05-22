@@ -15,8 +15,10 @@ init_per_suite(Config) ->
         true -> Config;
         false -> Config;
         ignored ->
-            {ok, _} = net_kernel:start([erlmcp_test_node, shortnames]),
-            [{started_dist, true} | Config]
+            case net_kernel:start([erlmcp_test_node, shortnames]) of
+                {ok, _} -> [{started_dist, true} | Config];
+                {error, _} -> {skip, "Distribution not available (epmd not running)"}
+            end
     end.
 
 end_per_suite(Config) ->
