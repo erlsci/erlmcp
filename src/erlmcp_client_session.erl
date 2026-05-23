@@ -232,14 +232,9 @@ uninitialized({call, From}, {initialize, Params}, Data) ->
     {keep_state, NewData#data{pending = Pending}};
 
 uninitialized(cast, {transport_data, RawData}, Data) ->
-    case erlmcp_json_rpc:decode_and_classify(RawData) of
-        {ok, {response, Id, Result}} ->
-            handle_init_response(Id, Result, Data);
-        {ok, {error_response, Id, Error}} ->
-            handle_init_error(Id, Error, Data);
-        _ ->
-            keep_state_and_data
-    end;
+    handle_uninitialized_data(RawData, Data);
+uninitialized(info, {transport_data, RawData}, Data) ->
+    handle_uninitialized_data(RawData, Data);
 
 uninitialized({call, From}, {set_handler, Type, Module}, Data) ->
     {keep_state, set_handler_field(Type, Module, Data), [{reply, From, ok}]};
@@ -293,18 +288,9 @@ operational({call, From}, {set_handler, Type, Module}, Data) ->
     {keep_state, set_handler_field(Type, Module, Data), [{reply, From, ok}]};
 
 operational(cast, {transport_data, RawData}, Data) ->
-    case erlmcp_json_rpc:decode_and_classify(RawData) of
-        {ok, {response, Id, Result}} ->
-            handle_response(Id, {ok, Result}, Data);
-        {ok, {error_response, Id, Error}} ->
-            handle_response(Id, {error, Error}, Data);
-        {ok, {notification, Method, Params}} ->
-            handle_notification(Method, Params, Data);
-        {ok, {request, Id, Method, Params}} ->
-            handle_inbound_request(Id, Method, Params, Data);
-        _ ->
-            keep_state_and_data
-    end;
+    handle_operational_data(RawData, Data);
+operational(info, {transport_data, RawData}, Data) ->
+    handle_operational_data(RawData, Data);
 
 operational(cast, roots_changed, Data) ->
     Json = erlmcp_json_rpc:encode_notification(
@@ -324,6 +310,34 @@ operational(_EventType, _Event, _Data) ->
 
 terminate(_Reason, _State, _Data) ->
     ok.
+
+%%====================================================================
+%% Transport data dispatch (cast or info — both accepted)
+%%====================================================================
+
+handle_uninitialized_data(RawData, Data) ->
+    case erlmcp_json_rpc:decode_and_classify(RawData) of
+        {ok, {response, Id, Result}} ->
+            handle_init_response(Id, Result, Data);
+        {ok, {error_response, Id, Error}} ->
+            handle_init_error(Id, Error, Data);
+        _ ->
+            keep_state_and_data
+    end.
+
+handle_operational_data(RawData, Data) ->
+    case erlmcp_json_rpc:decode_and_classify(RawData) of
+        {ok, {response, Id, Result}} ->
+            handle_response(Id, {ok, Result}, Data);
+        {ok, {error_response, Id, Error}} ->
+            handle_response(Id, {error, Error}, Data);
+        {ok, {notification, Method, Params}} ->
+            handle_notification(Method, Params, Data);
+        {ok, {request, Id, Method, Params}} ->
+            handle_inbound_request(Id, Method, Params, Data);
+        _ ->
+            keep_state_and_data
+    end.
 
 %%====================================================================
 %% Response handling (outbound requests)

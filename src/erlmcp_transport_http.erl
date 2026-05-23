@@ -301,7 +301,7 @@ handle_http_response(RequestId, Result, State) ->
             FinalState =
                 case process_response(Result) of
                     {ok, Response} ->
-                        maps:get(owner, State) ! {transport_message, Response},
+                        maps:get(owner, State) ! {transport_data, Response},
                         NewState;
                     {error, Reason} ->
                         case should_retry(Reason, Attempts, State) of

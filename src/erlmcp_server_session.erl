@@ -149,13 +149,9 @@ init(Opts) ->
 %%====================================================================
 
 uninitialized(cast, {transport_data, RawData}, Data) ->
-    case erlmcp_json_rpc:decode_and_classify(RawData) of
-        {ok, Classified} ->
-            handle_uninitialized_message(Classified, Data);
-        {error, _Reason} ->
-            send_error(Data, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
-            keep_state_and_data
-    end;
+    handle_uninitialized_data(RawData, Data);
+uninitialized(info, {transport_data, RawData}, Data) ->
+    handle_uninitialized_data(RawData, Data);
 uninitialized({call, From}, Msg, Data) ->
     handle_common_call(From, Msg, uninitialized, Data);
 uninitialized(_EventType, _Event, _Data) ->
@@ -167,6 +163,8 @@ uninitialized(_EventType, _Event, _Data) ->
 
 initializing(cast, {transport_data, _RawData}, _Data) ->
     keep_state_and_data;
+initializing(info, {transport_data, _RawData}, _Data) ->
+    keep_state_and_data;
 initializing({call, From}, Msg, Data) ->
     handle_common_call(From, Msg, initializing, Data);
 initializing(_EventType, _Event, _Data) ->
@@ -177,13 +175,9 @@ initializing(_EventType, _Event, _Data) ->
 %%====================================================================
 
 operational(cast, {transport_data, RawData}, Data) ->
-    case erlmcp_json_rpc:decode_and_classify(RawData) of
-        {ok, Classified} ->
-            handle_operational_message(Classified, Data);
-        {error, _Reason} ->
-            send_error(Data, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
-            keep_state_and_data
-    end;
+    handle_operational_data(RawData, Data);
+operational(info, {transport_data, RawData}, Data) ->
+    handle_operational_data(RawData, Data);
 operational(cast, {resource_updated, Uri}, Data) ->
     handle_resource_updated_cast(Uri, Data);
 operational(cast, {emit_log, Level, Logger, LogData}, Data) ->
@@ -258,6 +252,28 @@ handle_common_call(From, {set_log_level, Level}, _State, Data) ->
 %% Catch-all
 handle_common_call(From, _Msg, _State, _Data) ->
     {keep_state_and_data, [{reply, From, {error, unknown_request}}]}.
+
+%%====================================================================
+%% Transport data dispatch (cast or info — both accepted)
+%%====================================================================
+
+handle_uninitialized_data(RawData, Data) ->
+    case erlmcp_json_rpc:decode_and_classify(RawData) of
+        {ok, Classified} ->
+            handle_uninitialized_message(Classified, Data);
+        {error, _Reason} ->
+            send_error(Data, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
+            keep_state_and_data
+    end.
+
+handle_operational_data(RawData, Data) ->
+    case erlmcp_json_rpc:decode_and_classify(RawData) of
+        {ok, Classified} ->
+            handle_operational_message(Classified, Data);
+        {error, _Reason} ->
+            send_error(Data, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
+            keep_state_and_data
+    end.
 
 %%====================================================================
 %% Message handling — uninitialized

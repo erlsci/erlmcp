@@ -67,7 +67,7 @@ f4_async_response_path(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"request">>),
         receive
-            {transport_message, Received} ->
+            {transport_data, Received} ->
                 ?assertEqual(Body, Received)
         after 2000 ->
             ?assert(false)
@@ -87,7 +87,7 @@ test_binary_url(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, _} ->
+            {transport_data, _} ->
                 ok
         after 2000 ->
             ?assert(false)
@@ -122,7 +122,7 @@ test_get_method(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"key=value">>),
         receive
-            {transport_message, _} ->
+            {transport_data, _} ->
                 ok
         after 2000 ->
             ?assert(false)
@@ -165,7 +165,7 @@ test_http_error_response(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, _} ->
+            {transport_data, _} ->
                 ?assert(false)
         after 500 ->
             ok
@@ -184,7 +184,7 @@ test_request_error(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, _} ->
+            {transport_data, _} ->
                 ?assert(false)
         after 500 ->
             ok
@@ -239,7 +239,7 @@ test_retry_on_500(_) ->
             ?assert(false)
         end,
         receive
-            {transport_message, <<"retry_success">>} ->
+            {transport_data, <<"retry_success">>} ->
                 ok
         after 5000 ->
             ?assert(false)
@@ -258,7 +258,7 @@ test_no_retry_on_400(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, _} ->
+            {transport_data, _} ->
                 ?assert(false)
         after 500 ->
             ok
@@ -280,7 +280,7 @@ test_retry_exhaustion(_) ->
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         timer:sleep(500),
         receive
-            {transport_message, _} ->
+            {transport_data, _} ->
                 ?assert(false)
         after 100 ->
             ok
@@ -319,13 +319,13 @@ test_pool_limit(_) ->
         ok = erlmcp_transport_http:send(Pid, <<"req1">>),
         ok = erlmcp_transport_http:send(Pid, <<"req2">>),
         receive
-            {transport_message, _} ->
+            {transport_data, _} ->
                 ok
         after 2000 ->
             ?assert(false)
         end,
         receive
-            {transport_message, _} ->
+            {transport_data, _} ->
                 ok
         after 2000 ->
             ?assert(false)
@@ -359,7 +359,7 @@ test_list_body(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, Body} ->
+            {transport_data, Body} ->
                 ?assertEqual(<<"list body">>, Body)
         after 2000 ->
             ?assert(false)
@@ -391,7 +391,7 @@ test_invalid_body(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, _} ->
+            {transport_data, _} ->
                 ?assert(false)
         after 500 ->
             ok
@@ -467,7 +467,7 @@ test_httpc_immediate_error(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, _} ->
+            {transport_data, _} ->
                 ?assert(false)
         after 200 ->
             ok
@@ -606,7 +606,7 @@ test_retry_on_connect_failure(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, <<"connected">>} ->
+            {transport_data, <<"connected">>} ->
                 ok
         after 5000 ->
             ?assert(false)
@@ -647,7 +647,7 @@ test_non_json_content_type(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, <<"plain text">>} ->
+            {transport_data, <<"plain text">>} ->
                 ok
         after 2000 ->
             ?assert(false)
@@ -689,7 +689,7 @@ test_retry_on_429(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, <<"rate_ok">>} ->
+            {transport_data, <<"rate_ok">>} ->
                 ok
         after 5000 ->
             ?assert(false)
@@ -715,7 +715,7 @@ test_no_content_type_header(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, <<"no ct">>} ->
+            {transport_data, <<"no ct">>} ->
                 ok
         after 2000 ->
             ?assert(false)
@@ -755,7 +755,7 @@ test_retry_on_timeout(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, <<"timeout_ok">>} ->
+            {transport_data, <<"timeout_ok">>} ->
                 ok
         after 5000 ->
             ?assert(false)
@@ -781,7 +781,7 @@ test_no_retry_on_unknown_error(_) ->
         {ok, Pid} = erlmcp_transport_http:start_link(Opts),
         ok = erlmcp_transport_http:send(Pid, <<"data">>),
         receive
-            {transport_message, _} ->
+            {transport_data, _} ->
                 ?assert(false)
         after 500 ->
             ok

@@ -6,7 +6,7 @@
 -export([send/2, close/1]).
 
 %% API
--export([start_link/2, simulate_input/2]).
+-export([start_link/2, simulate_input/2, validate_config/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
@@ -42,6 +42,15 @@ start_link(TransportId, Config) when is_atom(TransportId), is_map(Config) ->
 -spec simulate_input(pid(), binary()) -> ok.
 simulate_input(Pid, Line) when is_pid(Pid), is_binary(Line) ->
     gen_server:call(Pid, {simulate_input, Line}).
+
+-spec validate_config(map()) -> ok | {error, term()}.
+validate_config(Config) when is_map(Config) ->
+    case maps:is_key(session, Config) of
+        true -> ok;
+        false -> {error, {missing_key, session}}
+    end;
+validate_config(_) ->
+    {error, not_a_map}.
 
 %%====================================================================
 %% gen_server callbacks
@@ -79,6 +88,10 @@ handle_call(_Request, _From, State) ->
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
+
+handle_info({send, Data}, State) ->
+    _ = write_stdout(Data),
+    {noreply, State};
 
 handle_info({line, Line}, #state{session = Session} = State)
   when is_pid(Session) ->

@@ -161,8 +161,9 @@ handle_info({tcp, Socket, Data}, #{socket := Socket, buffer := Buffer} = State) 
     {Messages, RemainingBuffer} = extract_messages(NewBuffer),
 
     %% Send messages to owner
-    lists:foreach(fun(Msg) -> maps:get(owner, State) ! {transport_message, Msg} end,
-                  Messages),
+    lists:foreach(fun(Msg) ->
+        maps:get(owner, State) ! {transport_data, Msg}
+    end, Messages),
 
     {noreply, State#{buffer := RemainingBuffer}};
 handle_info({tcp_closed, Socket}, #{socket := Socket} = State) ->
