@@ -240,25 +240,46 @@ unchanged over stdio, TCP, and streamable HTTP; transport conformance scenarios 
 ### M5 — Quality infrastructure · **P0 for credibility**
 *Goal: the artifact that earns "same quality as rmcp."*
 
-- **`erlmcp_conformance`:** a Common Test harness that drives a real session through
-  every L0–L4 capability and emits a **dated, versioned scorecard** (mirroring
-  rmcp's `conformance/results/*`). The protocol-native discoverability surfaces
-  (`instructions`, tool `_meta`, `annotations`, resources) are scored like any other
-  capability; the **directory tool is an erlmcp extension and is excluded from the
-  scorecard** (DISC-6, `m2-discoverability-design.md` §7).
+**Split into M5a + M5b** (2026-05-23): the original single M5 spanned the
+verification artifact (scorecard, test pyramid, specs, coverage) **and** a full docs
+rewrite + release automation — ~17 rows across two very different work modes
+(code/tests vs prose/CI-config), too large for the 5-iteration cap (same reasoning as
+the M2/M3 splits). The seam is character: M5a is the *quality artifact*; M5b is *docs
+& release discipline*. M5b depends on M5a (docs describe the scorecard-validated core).
+
+#### M5a — Conformance scorecard, test pyramid, specs & coverage
+*Ledger: `milestones/M5a-conformance-pyramid-coverage-ledger.md`. Depends on M1–M4.*
+
+- **`erlmcp_conformance`:** the harness (grown through M2b/M3b/M4) emits a **dated,
+  versioned scorecard** (server + client + transport) mirroring rmcp's
+  `conformance/results/*`, committed as a published artifact. Protocol-native
+  discoverability surfaces (`instructions`, tool `_meta`, `annotations`, resources)
+  are scored like any other capability; the **directory tool is excluded** (DISC-6,
+  `m2-discoverability-design.md` §7).
 - Full test pyramid: EUnit (units, 1–2 asserts), Common Test (lifecycle/transport/
-  e2e), **PropEr** (envelope + state-machine fuzzing). Real coverage gate (retire
-  `--min_coverage=0`).
-- `-spec`/`-type` on all exports; Dialyzer in CI; xref clean.
-- **Docs rewrite to match the code** (architecture, protocol, OTP patterns, API
-  reference) + accurate README + the finished migration guide. Examples all on the
-  new core.
-- Release/security automation: SemVer + a maintained CHANGELOG; consider CodeQL/
-  dependabot equivalents.
+  e2e), **PropEr** (envelope + state-machine fuzzing).
+- `-spec`/`-type` on **all** exports; Dialyzer + xref clean in CI.
+- **Coverage ratchet to 95%** over implemented modules (the M0 plan's 90%→95% endpoint);
+  M4's sub-90 coverage amendments (`stdio`, `server_sup`, `sup`) are resolved to the
+  floor or formally accepted with line-level rationale; only the M6 task modules
+  (`erlmcp_task`, `erlmcp_task_sup`) remain excluded.
+
+DoD: scorecard published and ≥ rmcp's reference across L0–L4; CI runs
+EUnit+CT+PropEr+Dialyzer+coverage green at the raised gate.
+
+#### M5b — Docs rewrite & release/security automation
+*Ledger: `milestones/M5b-docs-release-ledger.md`. Depends on M5a.*
+
+- **Docs rewrite to match the code:** `architecture.md`, `protocol.md`,
+  `otp-patterns.md`, `api-reference.md` (all currently 0.5-era), an accurate README,
+  and the finished `MIGRATION-0.5-to-0.6.md`. All examples on the new core.
+- **Docs verified against code:** no doc references a removed module/function; API
+  reference matches actual exports.
+- Release/security automation: SemVer + a maintained CHANGELOG; CodeQL/dependabot
+  equivalents.
 
 Closes: D (conformance harness, test strategy, stale docs, release discipline);
-B (specs/coverage). DoD: scorecard published; CI runs EUnit+CT+PropEr+Dialyzer+
-coverage; docs verified against code.
+B (specs/coverage). DoD: docs verified against code; release/security automation live.
 
 ### M6 — Native-strength features · **P1/P2**
 *Goal: the places erlmcp can exceed rmcp (Phase 2 §12).*
