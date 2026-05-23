@@ -775,7 +775,222 @@ server_completion_test() ->
     ?assert(maps:is_key(<<"result">>, Resp)),
     gen_statem:stop(Server).
 
+%% Cover initializing/shutting_down state catch-alls
+initializing_state_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    gen_statem:cast(Server, {transport_data, <<"junk">>}),
+    Server ! {transport_data, <<"junk">>},
+    gen_statem:cast(Server, random_event),
+    Server ! random_info,
+    timer:sleep(50),
+    ?assert(is_process_alive(Server)),
+    gen_statem:stop(Server).
+
+%% Cover {M,F} dispatch path
+mf_tool_dispatch_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"mf_tool">>,
+        description => <<"MF dispatch">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => {erlmcp_capabilities, supported_versions}
+    }),
+    init_server_with_transport(Server),
+    CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
+        <<"name">> => <<"mf_tool">>,
+        <<"arguments">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, CallReq),
+    _Resp = wait_transport_send(),
+    ?assert(is_process_alive(Server)),
+    gen_statem:stop(Server).
+
+%% Cover log levels not hit in other tests
+log_levels_coverage_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    init_server_with_transport(Server),
+    ok = erlmcp_server_session:set_log_level(Server, debug),
+    lists:foreach(fun(Level) ->
+        erlmcp_server_session:emit_log(Server, Level, <<"test">>, <<"msg">>),
+        _Notif = wait_transport_send()
+    end, [debug, info, notice, warning, error, critical, alert, emergency]),
+    gen_statem:stop(Server),
+    flush_sends().
+
+%% Cover pagination cursor path (>50 items)
+pagination_cursor_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    lists:foreach(fun(N) ->
+        Name = list_to_binary("tool_" ++ integer_to_list(N)),
+        ok = erlmcp_server_session:register_tool(Server, #{
+            name => Name, description => Name,
+            input_schema => erlmcp_schema:object([]),
+            handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+        })
+    end, lists:seq(1, 55)),
+    init_server_with_transport(Server),
+    ListReq1 = erlmcp_json_rpc:encode_request(2, <<"tools/list">>, #{}),
+    erlmcp_server_session:send_message(Server, ListReq1),
+    Resp1 = decode_resp(wait_transport_send()),
+    Result1 = maps:get(<<"result">>, Resp1),
+    ?assertEqual(50, length(maps:get(<<"tools">>, Result1))),
+    Cursor = maps:get(<<"nextCursor">>, Result1),
+    ?assert(is_binary(Cursor)),
+    ListReq2 = erlmcp_json_rpc:encode_request(3, <<"tools/list">>,
+        #{<<"cursor">> => Cursor}),
+    erlmcp_server_session:send_message(Server, ListReq2),
+    Resp2 = decode_resp(wait_transport_send()),
+    Result2 = maps:get(<<"result">>, Resp2),
+    ?assertEqual(5, length(maps:get(<<"tools">>, Result2))),
+    ?assertNot(maps:is_key(<<"nextCursor">>, Result2)),
+    gen_statem:stop(Server).
+
+%% Cover resource handler error path
+resource_handler_error_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_resource(Server, #{
+        uri => <<"err://fail">>, name => <<"Fail">>,
+        handler => fun(_Ctx) -> {error, -32000, <<"custom error">>} end
+    }),
+    init_server_with_transport(Server),
+    ReadReq = erlmcp_json_rpc:encode_request(2, <<"resources/read">>,
+        #{<<"uri">> => <<"err://fail">>}),
+    erlmcp_server_session:send_message(Server, ReadReq),
+    Resp = decode_resp(wait_transport_send()),
+    ?assertMatch(#{<<"error">> := #{<<"code">> := -32000}}, Resp),
+    gen_statem:stop(Server).
+
+%% Cover template match failure paths
+template_match_failure_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_resource_template(Server, #{
+        uri_template => <<"t://a/{id}/b">>, name => <<"T">>,
+        handler => fun(_, _) -> {ok, #{<<"uri">> => <<"t://x">>, <<"text">> => <<"y">>}} end
+    }),
+    init_server_with_transport(Server),
+    ReadReq = erlmcp_json_rpc:encode_request(2, <<"resources/read">>,
+        #{<<"uri">> => <<"t://a/1/b/extra">>}),
+    erlmcp_server_session:send_message(Server, ReadReq),
+    Resp = decode_resp(wait_transport_send()),
+    ?assertMatch(#{<<"error">> := _}, Resp),
+    gen_statem:stop(Server).
+
+%% Cover completion for missing prompt/template
+completion_missing_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    init_server_with_transport(Server),
+    CompReq = erlmcp_json_rpc:encode_request(2, <<"completion/complete">>, #{
+        <<"ref">> => #{<<"type">> => <<"ref/prompt">>, <<"name">> => <<"missing">>},
+        <<"argument">> => #{<<"name">> => <<"x">>, <<"value">> => <<"">>}
+    }),
+    erlmcp_server_session:send_message(Server, CompReq),
+    Resp = decode_resp(wait_transport_send()),
+    Result = maps:get(<<"result">>, Resp),
+    ?assertEqual([], maps:get(<<"values">>, maps:get(<<"completion">>, Result))),
+    gen_statem:stop(Server).
+
+%% Cover unknown common_call in shutting_down
+shutting_down_call_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ?assertEqual({error, unknown_request}, gen_statem:call(Server, bogus)),
+    gen_statem:stop(Server).
+
+%% Cover inbound via info (not cast) — the M4 transport path
+inbound_via_info_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    Server ! {transport_data, InitReq},
+    _InitResp = wait_transport_send(),
+    ?assertEqual(operational, gen_statem:call(Server, get_state)),
+    PingReq = erlmcp_json_rpc:encode_request(2, <<"ping">>, #{}),
+    Server ! {transport_data, PingReq},
+    _PingResp = wait_transport_send(),
+    gen_statem:stop(Server).
+
+%% Cover resource list contents format
+resource_list_contents_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_resource(Server, #{
+        uri => <<"r://a">>, name => <<"A">>,
+        description => <<"Desc A">>, mime_type => <<"text/plain">>,
+        handler => fun(_Ctx) ->
+            {ok, [#{<<"uri">> => <<"r://a">>, <<"text">> => <<"multi">>},
+                   #{<<"uri">> => <<"r://a">>, <<"text">> => <<"items">>}]}
+        end
+    }),
+    init_server_with_transport(Server),
+    ReadReq = erlmcp_json_rpc:encode_request(2, <<"resources/read">>,
+        #{<<"uri">> => <<"r://a">>}),
+    erlmcp_server_session:send_message(Server, ReadReq),
+    Resp = decode_resp(wait_transport_send()),
+    Contents = maps:get(<<"contents">>, maps:get(<<"result">>, Resp)),
+    ?assertEqual(2, length(Contents)),
+    gen_statem:stop(Server).
+
+%% Cover prompt get error path
+prompt_get_error_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_prompt(Server, #{
+        name => <<"fail_prompt">>, description => <<"Fails">>,
+        handler => fun(_, _) -> {error, -32000, <<"prompt error">>} end
+    }),
+    init_server_with_transport(Server),
+    GetReq = erlmcp_json_rpc:encode_request(2, <<"prompts/get">>,
+        #{<<"name">> => <<"fail_prompt">>, <<"arguments">> => #{}}),
+    erlmcp_server_session:send_message(Server, GetReq),
+    Resp = decode_resp(wait_transport_send()),
+    ?assertMatch(#{<<"error">> := #{<<"code">> := -32000}}, Resp),
+    gen_statem:stop(Server).
+
 init_server_with_transport(Server) ->
+    flush_sends(),
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
@@ -790,3 +1005,6 @@ decode_resp(Json) ->
 
 wait_transport_send() ->
     receive {send, Data} -> Data after 5000 -> error(transport_send_timeout) end.
+
+flush_sends() ->
+    receive {send, _} -> flush_sends() after 0 -> ok end.

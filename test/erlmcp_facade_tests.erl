@@ -295,6 +295,43 @@ start_stdio_setup_test() ->
     erlmcp_transport_stdio:close(Transport),
     gen_statem:stop(Server).
 
+stop_server_dead_process_test() ->
+    {ok, _} = application:ensure_all_started(erlmcp),
+    {ok, Pid} = erlmcp:start_server(dead_test_srv),
+    ok = erlmcp_registry:register_server(dead_test_srv, Pid, #{}),
+    gen_statem:stop(Pid),
+    timer:sleep(50),
+    ok = erlmcp:stop_server(dead_test_srv),
+    ok = application:stop(erlmcp),
+    timer:sleep(100).
+
+stop_transport_dead_process_test() ->
+    {ok, _} = application:ensure_all_started(erlmcp),
+    {ok, Pid} = erlmcp:start_transport(dead_t, stdio,
+        #{session => self(), test_mode => true}),
+    ok = erlmcp_registry:register_transport(dead_t, Pid, #{}),
+    erlmcp_transport_stdio:close(Pid),
+    timer:sleep(50),
+    ok = erlmcp:stop_transport(dead_t),
+    ok = application:stop(erlmcp),
+    timer:sleep(100).
+
+start_tcp_setup_test() ->
+    ok = meck:new(gen_tcp, [unstick, passthrough]),
+    FakeSocket = make_ref(),
+    meck:expect(gen_tcp, connect, fun(_H, _P, _O, _T) -> {ok, FakeSocket} end),
+    meck:expect(gen_tcp, close, fun(_) -> ok end),
+    meck:expect(gen_tcp, send, fun(_, _) -> ok end),
+    {ok, #{server := Server, transport := Transport}} =
+        erlmcp:start_tcp_setup(tcp_test_srv, #{},
+            #{host => "localhost", port => 9999}),
+    ?assert(is_process_alive(Server)),
+    ?assert(is_process_alive(Transport)),
+    unlink(Transport),
+    erlmcp_transport_tcp:close(Transport),
+    gen_statem:stop(Server),
+    meck:unload(gen_tcp).
+
 start_http_setup_test() ->
     {ok, #{server := Server, transport := Transport}} =
         erlmcp:start_http_setup(http_test_srv, #{}, #{test_mode => true}),

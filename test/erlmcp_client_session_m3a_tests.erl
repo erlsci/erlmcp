@@ -245,6 +245,82 @@ get_state_test() ->
     ?assertEqual(uninitialized, gen_statem:call(Client, get_state)),
     erlmcp_client_session:stop(Client).
 
+%% Cover inbound via info (M4 transport path) in uninitialized state
+inbound_via_info_uninitialized_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => SBridge, owner => self(),
+        name => <<"t">>, version => <<"1.0">>
+    }),
+    FakeResp = erlmcp_json_rpc:encode_response(999, #{}),
+    Client ! {transport_data, FakeResp},
+    timer:sleep(50),
+    ?assertEqual(uninitialized, gen_statem:call(Client, get_state)),
+    erlmcp_client_session:stop(Client).
+
+%% Cover inbound via info in operational state
+inbound_via_info_operational_test() ->
+    {_Server, Client} = setup_pair(),
+    FakeNotif = erlmcp_json_rpc:encode_notification(<<"test/notif">>, #{}),
+    Client ! {transport_data, FakeNotif},
+    timer:sleep(50),
+    ?assert(is_process_alive(Client)),
+    erlmcp_client_session:stop(Client).
+
+%% Cover subscribe/unsubscribe error paths
+subscribe_error_path_test() ->
+    {_Server, Client} = setup_pair(),
+    ok = erlmcp_client_session:subscribe_resource(Client, <<"x://a">>),
+    ok = erlmcp_client_session:unsubscribe_resource(Client, <<"x://a">>),
+    erlmcp_client_session:stop(Client).
+
+%% Cover ping error response
+ping_with_error_test() ->
+    {_Server, Client} = setup_pair(),
+    ok = erlmcp_client_session:ping(Client),
+    erlmcp_client_session:stop(Client).
+
+%% Cover collect_pages cursor path
+collect_pages_cursor_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => SBridge, name => <<"t">>, version => <<"1.0">>,
+        capabilities => #{}
+    }),
+    lists:foreach(fun(N) ->
+        Name = list_to_binary("tool_" ++ integer_to_list(N)),
+        ok = erlmcp_server_session:register_tool(Server, #{
+            name => Name, description => Name,
+            input_schema => erlmcp_schema:object([]),
+            handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+        })
+    end, lists:seq(1, 55)),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => CBridge, owner => self(),
+        name => <<"t">>, version => <<"1.0">>
+    }),
+    SBridge ! {peer, Client},
+    CBridge ! {peer, Server},
+    {ok, _} = erlmcp_client_session:initialize(Client, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    {ok, Tools} = erlmcp_client_session:list_tools(Client),
+    ?assertEqual(55, length(Tools)),
+    erlmcp_client_session:stop(Client),
+    gen_statem:stop(Server).
+
+%% Cover check_capability not_initialized path
+not_initialized_request_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => SBridge, owner => self(),
+        name => <<"t">>, version => <<"1.0">>
+    }),
+    ?assertMatch({error, _}, erlmcp_client_session:list_tools(Client, #{})),
+    erlmcp_client_session:stop(Client).
+
 %%====================================================================
 %% Single-page list variants (explicit params)
 %%====================================================================

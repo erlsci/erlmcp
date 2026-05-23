@@ -238,6 +238,8 @@ uninitialized(info, {transport_data, RawData}, Data) ->
 
 uninitialized({call, From}, {set_handler, Type, Module}, Data) ->
     {keep_state, set_handler_field(Type, Module, Data), [{reply, From, ok}]};
+uninitialized({call, From}, {request, _, _, _}, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, not_initialized}}]};
 uninitialized({call, From}, get_state, _Data) ->
     {keep_state_and_data, [{reply, From, uninitialized}]};
 uninitialized(_EventType, _Event, _Data) ->
