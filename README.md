@@ -1,6 +1,8 @@
 # erlmcp
 
 [![Build Status][gh-actions-badge]][gh-actions]
+[![Coverage][coverage-badge]][project]
+[![][tag-badge]][tag]
 
 [![Project Logo][logo]][logo-large]
 
@@ -97,7 +99,11 @@ Apache 2.0
 
 [//]: ---Named-Links---
 
+[project]: https://github.com/erlsci/erlmcp
 [logo]: priv/images/logo.png
 [logo-large]: priv/images/logo-large.png
 [gh-actions-badge]: https://github.com/erlsci/erlmcp/workflows/ci/badge.svg
 [gh-actions]: https://github.com/erlsci/erlmcp/actions?query=workflow%3Aci
+[coverage-badge]: https://img.shields.io/badge/coverage-90%25-brightgreen
+[tag-badge]: https://img.shields.io/github/tag/erlsci/erlmcp.svg
+[tag]: https://github.com/erlsci/erlmcp/tags
