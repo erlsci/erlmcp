@@ -296,7 +296,7 @@ reconnect_already_scheduled(_) ->
 
 send_failure_triggers_error(_) ->
     {"send failure triggers tcp_error", fun() ->
-        FakeSocket = mock_connect_ok(),
+        _ = mock_connect_ok(),
         meck:expect(gen_tcp, send, fun(_, _) -> {error, closed} end),
         {ok, Pid} = erlmcp_transport_tcp:start_link(#{
             host => "localhost", port => 9999, owner => self(),
@@ -312,7 +312,7 @@ send_failure_triggers_error(_) ->
 
 tcp_options_with_extras(_) ->
     {"optional tcp options are passed through", fun() ->
-        FakeSocket = mock_connect_ok(),
+        _ = mock_connect_ok(),
         {ok, Pid} = erlmcp_transport_tcp:start_link(#{
             host => "localhost", port => 9999, owner => self(),
             max_reconnect_attempts => 3,

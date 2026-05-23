@@ -3,12 +3,6 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -include("erlmcp.hrl").
--record(mcp_client_capabilities, {
-    roots :: term(),
-    sampling :: term(),
-    experimental :: map() | undefined
-}).
-
 %%====================================================================
 %% Test fixtures
 %%====================================================================
