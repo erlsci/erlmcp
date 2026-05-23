@@ -6,88 +6,75 @@
 
 [![Project Logo][logo]][logo-large]
 
-*Erlang implementation of the Model Context Protocol (MCP) SDK.*
+*Erlang/OTP implementation of the Model Context Protocol (MCP).*
 
-MCP enables seamless communication between AI assistants and local services through a standardized protocol. This SDK provides both client and server implementations with full OTP compliance, allowing you to build robust, fault-tolerant integrations that expose resources, tools, and prompts to AI systems.
+## What It Is
 
-## Installation
+erlmcp is an Erlang/OTP implementation of the
+[Model Context Protocol](https://modelcontextprotocol.io/) (MCP 2025-11-25).
+It provides both server and client sessions, built on `gen_statem` with
+per-request process isolation, cancellation-as-exit, and transport-agnostic
+design.
 
-**Requirements:** Erlang/OTP 25 or later
+## Status
+
+**0.6.0** — complete re-core. Production-grade server and client with:
+
+- Full MCP 2025-11-25 protocol surface (tools, resources, prompts, logging,
+  completion, sampling, roots, elicitation)
+- Conformance scorecard: server 100%, client 100%, transport 100%
+- Test coverage: 94% aggregate, every module ≥90%
+- 396 EUnit + 92 CT + 8 PropEr tests
+
+## Install
+
+Add to your `rebar.config`:
 
 ```erlang
-%% rebar.config
 {deps, [
-    {erlmcp, "0.5.1"}
+    {erlmcp, {git, "https://github.com/erlsci/erlmcp.git", {tag, "0.6.0"}}}
 ]}.
 ```
 
-```bash
-rebar3 compile
-```
-
-## Quick Start
-
-### Creating an MCP Server
+## Quickstart
 
 ```erlang
-%% Start a server that exposes resources
-{ok, Server} = erlmcp_server:start_link({stdio, []}, Capabilities),
+%% Start a server session
+{ok, Server} = erlmcp:start_server(my_server),
 
-%% Add a resource
-erlmcp_server:add_resource(Server, <<"hello://world">>,
-    fun(_Uri) -> <<"Hello from Erlang!">> end),
+%% Register a tool
+Schema = erlmcp_schema:object([
+    erlmcp_schema:field(<<"city">>, erlmcp_schema:string(), [required])
+]),
+ok = erlmcp:add_tool(Server, #{
+    name => <<"get_weather">>,
+    description => <<"Look up weather for a city">>,
+    input_schema => Schema,
+    handler => fun(#{<<"city">> := City}, _Ctx) ->
+        {ok, erlmcp:text(<<"Sunny in ", City/binary>>)}
+    end
+}),
 
-%% Add a tool with JSON Schema validation
-Schema = #{<<"type">> => <<"object">>,
-           <<"properties">> => #{<<"name">> => #{<<"type">> => <<"string">>}}},
-erlmcp_server:add_tool_with_schema(Server, <<"greet">>,
-    fun(#{<<"name">> := Name}) ->
-        <<"Hello, ", Name/binary, "!">>
-    end, Schema).
+%% Or use a handler behaviour module
+ok = erlmcp:register_handler(Server, my_tools).
 ```
 
-### Creating an MCP Client
-
-```erlang
-%% Connect to an MCP server
-{ok, Client} = erlmcp_client:start_link({stdio, []}, #{strict_mode => false}),
-
-%% Initialize connection
-{ok, _} = erlmcp_client:initialize(Client, Capabilities),
-
-%% List available resources
-{ok, #{<<"resources">> := Resources}} = erlmcp_client:list_resources(Client),
-
-%% Call a tool
-{ok, Result} = erlmcp_client:call_tool(Client, <<"greet">>,
-                                        #{<<"name">> => <<"World">>}).
-```
-
-## Examples
-
-See the [examples directory](examples/README.md) for comprehensive examples:
-
-- **[Weather Server](examples/README.md#1-weather-server-weather_servererl)** - Full MCP server with resources, tools, and subscriptions
-- **[Calculator Client](examples/README.md#2-calculator-client-calculator_clienterl)** - Sophisticated client with connection management
-- **[Complete Application](examples/README.md#3-mcp-application-mcp_applicationerl)** - OTP application with supervision
+See the [examples](test/) for complete calculator, weather, client, and
+sampling examples with CT suites.
 
 ## Documentation
 
-- [Architecture Overview](docs/architecture.md) - System design and components
-- [Protocol Guide](docs/protocol.md) - MCP protocol implementation details
-- [OTP Patterns](docs/otp-patterns.md) - Erlang/OTP best practices used
-- [API Reference](docs/api-reference.md) - Complete API documentation
+- [Architecture](docs/architecture.md) — session lifecycle, workers, transports
+- [Protocol](docs/protocol.md) — MCP 2025-11-25 method coverage
+- [OTP Patterns](docs/otp-patterns.md) — let-it-crash, supervision, validation
+- [API Reference](docs/api-reference.md) — all exports
+- [Migration Guide](docs/0.6.0/MIGRATION-0.5-to-0.6.md) — porting from 0.5
 
-## Key Features
+## Versioning
 
-- ✅ Full MCP protocol support (resources, tools, prompts)
-- ✅ OTP-compliant with supervision trees
-- ✅ Multiple transport layers (stdio, TCP, HTTP)
-- ✅ JSON Schema validation for tools
-- ✅ Resource subscriptions with notifications
-- ✅ Automatic reconnection with backoff
-- ✅ Comprehensive error handling
-- ✅ Production-ready logging and monitoring
+erlmcp follows [Semantic Versioning](https://semver.org/). The 0.6.0 release
+is a breaking re-core — see the migration guide for details. Release notes
+are maintained in Git tags.
 
 ## License
 
@@ -95,7 +82,8 @@ Apache 2.0
 
 ## External Resources
 
-- [Get started with the Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction)
+- [Model Context Protocol](https://modelcontextprotocol.io/introduction)
+- [Conformance Scorecard](conformance/results/)
 
 [//]: ---Named-Links---
 
@@ -104,6 +92,6 @@ Apache 2.0
 [logo-large]: priv/images/logo-large.png
 [gh-actions-badge]: https://github.com/erlsci/erlmcp/workflows/ci/badge.svg
 [gh-actions]: https://github.com/erlsci/erlmcp/actions?query=workflow%3Aci
-[coverage-badge]: https://img.shields.io/badge/coverage-90%25-brightgreen
+[coverage-badge]: https://img.shields.io/badge/coverage-94%25-brightgreen
 [tag-badge]: https://img.shields.io/github/tag/erlsci/erlmcp.svg
 [tag]: https://github.com/erlsci/erlmcp/tags

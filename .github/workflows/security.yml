@@ -1,0 +1,28 @@
+name: security
+
+on:
+  push:
+    branches: [main, 'release/**']
+  pull_request:
+    branches: [main, 'release/**']
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-22.04
+    permissions:
+      security-events: write
+    steps:
+    - uses: actions/checkout@v4
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: javascript
+        config: |
+          paths-ignore:
+            - '_build/**'
+            - 'deps/**'
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3

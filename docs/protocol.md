@@ -1,209 +1,77 @@
 # MCP Protocol Implementation
 
-## Protocol Overview
+erlmcp implements the MCP 2025-11-25 protocol specification.
 
-The Model Context Protocol (MCP) enables structured communication between AI assistants and local services using JSON-RPC 2.0 over various transports.
+## Protocol Basics (L0)
 
-## Message Types
+- **`initialize`** — version negotiation, capability exchange, server info
+- **`ping`** — liveness check
+- **`notifications/initialized`** — client signals ready
+- **`notifications/cancelled`** — cancels an in-flight request
 
-### Requests
-```erlang
-%% Initialize connection
-#{
-    <<"jsonrpc">> => <<"2.0">>,
-    <<"id">> => 1,
-    <<"method">> => <<"initialize">>,
-    <<"params">> => #{
-        <<"protocolVersion">> => <<"2024-11-05">>,
-        <<"capabilities">> => #{...}
-    }
-}
-```
+## Tools (L1)
 
-### Responses
-```erlang
-%% Success response
-#{
-    <<"jsonrpc">> => <<"2.0">>,
-    <<"id">> => 1,
-    <<"result">> => #{...}
-}
+- **`tools/list`** — paginated listing with `inputSchema`, `annotations`, `_meta`
+- **`tools/call`** — runs a tool handler in a per-request worker; input
+  validated against `inputSchema` via `jesse` before dispatch
 
-%% Error response
-#{
-    <<"jsonrpc">> => <<"2.0">>,
-    <<"id">> => 1,
-    <<"error">> => #{
-        <<"code">> => -32602,
-        <<"message">> => <<"Invalid params">>
-    }
-}
-```
+## Resources (L2)
 
-### Notifications
-```erlang
-%% Resource update notification
-#{
-    <<"jsonrpc">> => <<"2.0">>,
-    <<"method">> => <<"resources/updated">>,
-    <<"params">> => #{
-        <<"uri">> => <<"weather://city">>,
-        <<"metadata">> => #{...}
-    }
-}
-```
+- **`resources/list`** — paginated listing of static resources
+- **`resources/read`** — reads resource contents by URI
+- **`resources/templates/list`** — lists URI templates (level-1 expansion)
+- **`resources/subscribe`** / **`unsubscribe`** — subscribe to resource updates
+- **`notifications/resources/updated`** — server notifies on resource change
+- **`notifications/resources/list_changed`** — server notifies on add/remove
 
-## Core Methods
+## Prompts (L3)
 
-### Client → Server
+- **`prompts/list`** — paginated listing with argument definitions
+- **`prompts/get`** — renders a prompt with arguments into messages
+- **`notifications/prompts/list_changed`** — server notifies on add/remove
 
-| Method | Description | Required Capability |
-|--------|-------------|-------------------|
-| `initialize` | Establish connection | None |
-| `resources/list` | List available resources | resources |
-| `resources/read` | Read resource content | resources |
-| `resources/subscribe` | Subscribe to updates | resources |
-| `tools/list` | List available tools | tools |
-| `tools/call` | Execute a tool | tools |
-| `prompts/list` | List available prompts | prompts |
-| `prompts/get` | Get prompt template | prompts |
+## Logging (L3)
 
-### Server → Client
+- **`logging/setLevel`** — sets the minimum log level
+- **`notifications/message`** — server emits log messages at or above level
 
-| Method | Description | Trigger |
-|--------|-------------|---------|
-| `resources/updated` | Resource changed | Subscription |
-| `resources/list_changed` | Resource list changed | Capability |
-| `tools/list_changed` | Tool list changed | Capability |
-| `prompts/list_changed` | Prompt list changed | Capability |
+## Completion (L4)
 
-## Capability Negotiation
+- **`completion/complete`** — returns completions for prompt arguments or
+  resource template parameters
 
-### Client Capabilities
-```erlang
-#mcp_client_capabilities{
-    roots = #mcp_capability{enabled = true},      % File system roots
-    sampling = #mcp_capability{enabled = true}    % LLM sampling support
-}
-```
+## Server-to-Client (L4)
 
-### Server Capabilities
-```erlang
-#mcp_server_capabilities{
-    resources = #mcp_capability{enabled = true},  % Resource support
-    tools = #mcp_capability{enabled = true},      % Tool support
-    prompts = #mcp_capability{enabled = true},    % Prompt support
-    logging = #mcp_capability{enabled = true}     % Logging support
-}
-```
+- **`sampling/createMessage`** — server requests an LLM completion from the
+  client via `erlmcp_ctx:request_peer/3`
+- **`roots/list`** — server queries the client's root URIs
+- **`elicitation/create`** — server requests user input from the client
 
-## Resource System
+## Discoverability
 
-### Static Resources
-```erlang
-erlmcp_server:add_resource(Server, <<"doc://readme">>, 
-    fun(_Uri) -> 
-        {ok, Content} = file:read_file("README.md"),
-        Content
-    end).
-```
+Protocol-native surfaces (no extensions required):
 
-### Dynamic Resources (Templates)
-```erlang
-erlmcp_server:add_resource_template(Server, 
-    <<"user://{username}/profile">>,
-    <<"User Profile">>,
-    fun(Uri) ->
-        %% Extract username and fetch profile
-        #mcp_content{
-            type = <<"application/json">>,
-            text = fetch_user_profile(Uri)
-        }
-    end).
-```
+- **`instructions`** — free-form server guidance in the `initialize` response
+- **`_meta`** — per-tool wayfinding metadata (`io.erlmcp/category`,
+  `io.erlmcp/when_to_use`, `io.erlmcp/returns`, `io.erlmcp/next`)
+- **`annotations`** — behavioral hints (`readOnlyHint`, `destructiveHint`,
+  `idempotentHint`, `openWorldHint`, `title`)
 
-## Tool System
+The **directory tool** is an erlmcp extension (Tier 2), excluded from the
+conformance scorecard (DISC-6).
 
-### Tool with JSON Schema
-```erlang
-Schema = #{
-    <<"type">> => <<"object">>,
-    <<"properties">> => #{
-        <<"query">> => #{
-            <<"type">> => <<"string">>,
-            <<"description">> => <<"SQL query">>
-        },
-        <<"limit">> => #{
-            <<"type">> => <<"integer">>,
-            <<"minimum">> => 1,
-            <<"maximum">> => 1000,
-            <<"default">> => 100
-        }
-    },
-    <<"required">> => [<<"query">>]
-},
+## Capabilities
 
-erlmcp_server:add_tool_with_schema(Server, <<"sql_query">>,
-    fun(#{<<"query">> := Query} = Args) ->
-        Limit = maps:get(<<"limit">>, Args, 100),
-        execute_query(Query, Limit)
-    end, Schema).
-```
+Capabilities are derived from registrations, not hardcoded:
 
-## Prompt System
+- `tools` + `listChanged` — when tools are registered
+- `resources` + `subscribe` + `listChanged` — when resources/templates exist
+- `prompts` + `listChanged` — when prompts are registered
+- `logging` — always (handler always exists)
+- `completions` — always (handler always exists)
+- `sampling` / `roots` / `elicitation` — client-side, when handler registered
 
-### Prompt with Arguments
-```erlang
-Arguments = [
-    #mcp_prompt_argument{
-        name = <<"language">>,
-        description = <<"Target programming language">>,
-        required = true
-    },
-    #mcp_prompt_argument{
-        name = <<"style">>,
-        description = <<"Code style guide">>,
-        required = false
-    }
-],
+## Pagination
 
-erlmcp_server:add_prompt_with_args(Server, <<"code_review">>,
-    fun(#{<<"language">> := Lang} = Args) ->
-        Style = maps:get(<<"style">>, Args, <<"default">>),
-        [#{
-            <<"role">> => <<"system">>,
-            <<"content">> => generate_review_prompt(Lang, Style)
-        }]
-    end, Arguments).
-```
-
-## Error Handling
-
-### Standard Error Codes
-- `-32700` - Parse error
-- `-32600` - Invalid request
-- `-32601` - Method not found
-- `-32602` - Invalid params
-- `-32603` - Internal error
-
-### Application Errors
-```erlang
-%% Return error from handler
-fun(Args) ->
-    case validate_args(Args) of
-        ok -> process(Args);
-        {error, Reason} ->
-            throw({mcp_error, -32602, Reason})
-    end
-end
-```
-
-## Best Practices
-
-1. **Always validate inputs** - Use JSON Schema for tools
-2. **Handle partial failures** - Return partial results when possible
-3. **Use appropriate content types** - text, image, binary
-4. **Implement timeouts** - Prevent hanging requests
-5. **Log errors with context** - Aid debugging
-6. **Version your resources** - Include version in URIs
-7. **Document tool schemas** - Use description fields
+All list endpoints use opaque cursor-based pagination (`cursor`/`nextCursor`).
+The client's `list_tools/1`, `list_resources/1`, etc. auto-follow cursors.

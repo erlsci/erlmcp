@@ -2,141 +2,90 @@
 
 ## Overview
 
-The erlmcp SDK is built on Erlang/OTP principles, providing a robust and fault-tolerant implementation of the Model Context Protocol.
+erlmcp 0.6.0 is an Erlang/OTP implementation of the Model Context Protocol
+(MCP), built around a `gen_statem` session + per-request-process spine. The
+architecture emphasises fault isolation, transport agnosticism, and the
+principle of "validate at the edge, crash in the interior."
 
-## System Components
+## Core Components
+
+### Session Layer
+
+Two `gen_statem` processes implement the MCP session lifecycle:
+
+- **`erlmcp_server_session`** — server-side protocol state machine
+  (`uninitialized → initializing → operational → shutting_down`). Handles
+  tools, resources, prompts, logging, completion, and the discoverability
+  surfaces. Can initiate outbound requests to the client (sampling, roots,
+  elicitation) via the `erlmcp_ctx:request_peer/3` peer handle.
+
+- **`erlmcp_client_session`** — client-side state machine. Issues requests
+  to the server (list/call/read/get/subscribe/complete), handles inbound
+  notifications, and dispatches inbound server requests to registered
+  callback behaviours (`erlmcp_sampling`, `erlmcp_roots`,
+  `erlmcp_elicitation`).
+
+Both sessions accept transport data via cast or info (`{transport_data, _}`),
+making them transport-agnostic.
+
+### Per-Request Worker Isolation
+
+Every tool call, resource read, prompt get, and callback dispatch runs in a
+short-lived worker process that the session monitors. A crashing handler
+produces an `'EXIT'` that the session catches and converts to a JSON-RPC
+`-32603` error response. One bad request cannot take down the session.
+
+Cancellation is process termination: `notifications/cancelled` kills the
+worker. No cooperative cancellation tokens, no map to maintain.
+
+### Transport Layer
+
+The `erlmcp_transport` behaviour defines a uniform contract:
+
+- **Inbound:** transport delivers data to the session via
+  `Session ! {transport_data, Data}`
+- **Outbound:** session sends via `Transport ! {send, Data}`
+- Four implementations: `erlmcp_transport_stdio`, `_tcp`, `_http`,
+  `_streamable_http`
+
+The session never knows which transport it's on.
+
+### Registry
+
+`erlmcp_registry` (gen_server) handles discovery and binding only — no
+per-message routing on the hot path. Once a connection is established,
+the session talks to its transport directly.
+
+### Schema & Validation
+
+`erlmcp_schema` provides a composable builder for JSON Schema maps,
+validated by `jesse` at the session boundary before dispatch. Input args
+are validated before the handler runs; structured output is validated
+before the response is sent.
+
+## Supervision Tree
 
 ```
-┌─────────────────┐     ┌─────────────────┐
-│   MCP Client    │     │   MCP Server    │
-├─────────────────┤     ├─────────────────┤
-│ erlmcp_client   │────▶│ erlmcp_server   │
-│ (gen_server)    │     │ (gen_server)    │
-└────────┬────────┘     └────────┬────────┘
-         │                       │
-         ▼                       ▼
-┌─────────────────┐     ┌─────────────────┐
-│ Transport Layer │     │ Transport Layer │
-├─────────────────┤     ├─────────────────┤
-│ - stdio         │     │ - stdio         │
-│ - TCP           │     │ - TCP           │
-│ - HTTP          │     │ - HTTP          │
-└─────────────────┘     └─────────────────┘
+erlmcp_sup (one_for_all)
+├── erlmcp_registry          (gen_server)
+├── erlmcp_server_sup        (simple_one_for_one → server sessions)
+├── erlmcp_session_sup       (simple_one_for_one → sessions)
+└── erlmcp_transport_sup     (one_for_one → transports)
 ```
 
-## Core Modules
+## Discoverability
 
-### Protocol Layer
-- **erlmcp_json_rpc** - JSON-RPC 2.0 message encoding/decoding
-- **erlmcp.hrl** - Protocol type definitions and records
+Tool metadata (`category`, `when_to_use`, `returns`, `next`) lives on the
+registration map (the single source of truth) and is projected into three
+surfaces:
 
-### Client Components
-- **erlmcp_client** - Main client gen_server
-- **erlmcp_client_sup** - Client supervisor for managing multiple connections
+1. **`instructions`** (Tier 0) — strategy + categories, returned at
+   `initialize`
+2. **`_meta`** (Tier 1) — per-tool wayfinding under `io.erlmcp/` prefix in
+   `tools/list`
+3. **Directory tool** (Tier 2) — optional, categorised projection
 
-### Server Components
-- **erlmcp_server** - Main server gen_server
-- **erlmcp_server_sup** - Server supervisor
+## Conformance
 
-### Transport Modules
-- **erlmcp_transport_stdio** - Standard I/O transport
-- **erlmcp_transport_tcp** - TCP socket transport
-- **erlmcp_transport_http** - HTTP transport
-
-## Design Principles
-
-### 1. Process Isolation
-Each connection runs in its own process, ensuring:
-- Fault isolation
-- Independent state management
-- Concurrent operation
-
-### 2. Supervision Trees
-```
-erlmcp_sup
-├── erlmcp_client_sup
-│   └── erlmcp_client (dynamic)
-└── erlmcp_server_sup
-    └── erlmcp_server (dynamic)
-```
-
-### 3. Message Flow
-
-**Client Request Flow:**
-1. API call → gen_server:call
-2. Encode request (JSON-RPC)
-3. Send via transport
-4. Await response
-5. Decode response
-6. Return to caller
-
-**Server Request Flow:**
-1. Receive message from transport
-2. Decode request
-3. Route to handler
-4. Execute handler
-5. Encode response
-6. Send response
-
-### 4. State Management
-
-**Client State:**
-```erlang
-#state{
-    transport :: module(),
-    transport_state :: term(),
-    capabilities :: #mcp_server_capabilities{},
-    request_id :: integer(),
-    pending_requests :: map(),
-    subscriptions :: sets:set()
-}
-```
-
-**Server State:**
-```erlang
-#state{
-    transport :: module(),
-    transport_state :: term(),
-    capabilities :: #mcp_server_capabilities{},
-    resources :: map(),
-    tools :: map(),
-    prompts :: map(),
-    subscriptions :: map()
-}
-```
-
-## Extension Points
-
-### Custom Transports
-Implement the transport behavior:
-```erlang
--callback init(Opts :: map()) -> {ok, State} | {error, Reason}.
--callback send(State, Data :: binary()) -> ok | {error, Reason}.
--callback close(State) -> ok.
-```
-
-### Resource Handlers
-```erlang
--type resource_handler() :: fun((Uri :: binary()) -> 
-    binary() | #mcp_content{}).
-```
-
-### Tool Handlers
-```erlang
--type tool_handler() :: fun((Args :: map()) -> 
-    binary() | #mcp_content{} | [#mcp_content{}]).
-```
-
-## Performance Considerations
-
-1. **Process Pooling** - Use poolboy for connection pooling
-2. **ETS for Caching** - Cache frequently accessed resources
-3. **Binary Handling** - Use binary strings for efficiency
-4. **Lazy Evaluation** - Handlers are called only when needed
-
-## Security Model
-
-- Transport-level security (TLS for TCP/HTTP)
-- Input validation via JSON Schema
-- Capability-based access control
-- No direct code execution
+The `erlmcp_conformance` module runs L0–L4 server, client, and transport
+scenarios. The published scorecard is at `conformance/results/`.

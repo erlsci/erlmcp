@@ -1,240 +1,174 @@
 # erlmcp API Reference
 
-## Client API
+## Server Facade (`erlmcp`)
 
-### Starting a Client
+### Server Management
 
-```erlang
--spec erlmcp_client:start_link(TransportOpts, Options) -> {ok, pid()} | {error, term()}.
+| Function | Description |
+|----------|-------------|
+| `start_server(ServerId)` | Start a server session |
+| `start_server(ServerId, Config)` | Start with config |
+| `stop_server(ServerId)` | Stop a server |
+| `list_servers()` | List registered servers |
+| `start_transport(Id, Type)` | Start a transport |
+| `start_transport(Id, Type, Config)` | Start with config |
+| `stop_transport(Id)` | Stop a transport |
+| `bind_transport_to_server(TransId, ServerId)` | Bind transport to server |
 
-TransportOpts :: {stdio, []} | 
-                 {tcp, #{host => string(), port => integer()}} |
-                 {http, #{url => string()}}
+### Tools
 
-Options :: #{
-    strict_mode => boolean(),     % Default: false
-    timeout => timeout(),         % Default: 5000ms
-    max_pending => integer()      % Default: 100
-}
-```
+| Function | Description |
+|----------|-------------|
+| `add_tool(Session, ToolSpec)` | Register a tool (data-driven map) |
+| `remove_tool(Session, Name)` | Unregister a tool |
+| `register_handler(Session, Module)` | Register a handler behaviour module |
+| `make_directory_tool()` | Create the directory tool spec |
+| `conformance_tools(Session)` | List tools excluding the directory |
 
-### Core Operations
+### Resources
 
-```erlang
-%% Initialize connection
--spec initialize(Client, Capabilities) -> {ok, InitResult} | {error, term()}.
--spec initialize(Client, Capabilities, Options) -> {ok, InitResult} | {error, term()}.
+| Function | Description |
+|----------|-------------|
+| `add_resource(Session, Spec)` | Register a resource |
+| `remove_resource(Session, Uri)` | Unregister a resource |
+| `add_resource_template(Session, Spec)` | Register a URI template |
+| `remove_resource_template(Session, UriTpl)` | Unregister a template |
+| `notify_resource_updated(Session, Uri)` | Notify subscribers of a change |
 
-%% Resource operations
--spec list_resources(Client) -> {ok, #{resources => [Resource]}} | {error, term()}.
--spec read_resource(Client, Uri) -> {ok, #{contents => [Content]}} | {error, term()}.
--spec subscribe_to_resource(Client, Uri) -> ok | {error, term()}.
--spec unsubscribe_from_resource(Client, Uri) -> ok | {error, term()}.
+### Prompts
 
-%% Tool operations  
--spec list_tools(Client) -> {ok, #{tools => [Tool]}} | {error, term()}.
--spec call_tool(Client, Name, Arguments) -> {ok, #{content => [Content]}} | {error, term()}.
+| Function | Description |
+|----------|-------------|
+| `add_prompt(Session, Spec)` | Register a prompt |
+| `remove_prompt(Session, Name)` | Unregister a prompt |
 
-%% Prompt operations
--spec list_prompts(Client) -> {ok, #{prompts => [Prompt]}} | {error, term()}.
--spec get_prompt(Client, Name) -> {ok, #{messages => [Message]}} | {error, term()}.
--spec get_prompt(Client, Name, Arguments) -> {ok, #{messages => [Message]}} | {error, term()}.
-```
+### Logging
 
-### Advanced Features
+| Function | Description |
+|----------|-------------|
+| `log_message(Session, Level, Logger, Data)` | Emit a log notification |
 
-```erlang
-%% Batch operations
--spec with_batch(Client, fun((BatchId) -> Result)) -> Result.
--spec send_batch_request(Client, BatchId, Method, Params) -> {ok, RequestId} | {error, term()}.
+### Content Constructors
 
-%% Notification handling
--spec set_notification_handler(Client, Method, Handler) -> ok.
-Handler :: fun((Method :: binary(), Params :: map()) -> any()) |
-           {Module :: atom(), Function :: atom()}
+| Function | Description |
+|----------|-------------|
+| `text(Binary)` | Text content item |
+| `image(Data, MimeType)` | Base64 image content |
+| `audio(Data, MimeType)` | Base64 audio content |
+| `embedded_resource(Resource)` | Embedded resource content |
+| `resource_link(Uri, MimeType)` | Resource link content |
 
-%% Sampling support
--spec set_sampling_handler(Client, Handler) -> ok.
--spec remove_sampling_handler(Client) -> ok.
-```
+### Convenience Setup
 
-## Server API
+| Function | Description |
+|----------|-------------|
+| `start_stdio_setup(ServerId, Config)` | Start server + stdio transport |
+| `start_tcp_setup(ServerId, ServerConfig, TcpConfig)` | Start server + TCP |
+| `start_http_setup(ServerId, ServerConfig, HttpConfig)` | Start server + HTTP |
 
-### Starting a Server
+## Client Session (`erlmcp_client_session`)
 
-```erlang
--spec erlmcp_server:start_link(TransportOpts, Capabilities) -> {ok, pid()} | {error, term()}.
+### Lifecycle
 
-Capabilities :: #mcp_server_capabilities{
-    resources :: #mcp_capability{} | undefined,
-    tools :: #mcp_capability{} | undefined, 
-    prompts :: #mcp_capability{} | undefined,
-    logging :: #mcp_capability{} | undefined
-}
-```
+| Function | Description |
+|----------|-------------|
+| `start_link(Opts)` | Start a client session |
+| `initialize(Session, Params)` | Perform MCP initialize handshake |
+| `ping(Session)` | Ping the server |
+| `cancel(Session, RequestId)` | Cancel an in-flight request |
+| `stop(Session)` | Stop the session |
 
-### Resource Management
+### Request API
 
-```erlang
-%% Add static resource
--spec add_resource(Server, Uri, Handler) -> ok.
-Handler :: fun((Uri :: binary()) -> binary() | #mcp_content{})
+| Function | Description |
+|----------|-------------|
+| `list_tools(Session)` | List all tools (auto-paginate) |
+| `list_tools(Session, Params)` | List one page of tools |
+| `call_tool(Session, Name, Args)` | Call a tool |
+| `call_tool(Session, Name, Args, Opts)` | Call with options (progress token) |
+| `list_resources(Session)` | List all resources (auto-paginate) |
+| `read_resource(Session, Uri)` | Read a resource |
+| `list_resource_templates(Session)` | List all templates (auto-paginate) |
+| `subscribe_resource(Session, Uri)` | Subscribe to resource updates |
+| `unsubscribe_resource(Session, Uri)` | Unsubscribe |
+| `list_prompts(Session)` | List all prompts (auto-paginate) |
+| `get_prompt(Session, Name, Args)` | Get a rendered prompt |
+| `set_log_level(Session, Level)` | Set server log level |
+| `complete(Session, Ref, Argument)` | Get completions |
 
-%% Add dynamic resource template
--spec add_resource_template(Server, UriTemplate, Name, Handler) -> ok.
-UriTemplate :: binary()  % e.g., <<"user://{id}/profile">>
+### Callback Registration
 
-%% Example
-erlmcp_server:add_resource(Server, <<"config://app">>,
-    fun(_Uri) ->
-        #mcp_content{
-            type = <<"application/json">>,
-            text = jsx:encode(get_config())
-        }
-    end).
-```
+| Function | Description |
+|----------|-------------|
+| `set_sampling_handler(Session, Module)` | Register sampling callback |
+| `set_roots_handler(Session, Module)` | Register roots callback |
+| `set_elicitation_handler(Session, Module)` | Register elicitation callback |
+| `notify_roots_changed(Session)` | Notify server of roots change |
 
-### Tool Management
+## Schema Builder (`erlmcp_schema`)
 
-```erlang
-%% Add tool without schema
--spec add_tool(Server, Name, Handler) -> ok.
-Handler :: fun((Arguments :: map()) -> Result)
-Result :: binary() | #mcp_content{} | [#mcp_content{}]
+| Function | Description |
+|----------|-------------|
+| `object(Fields)` | Build an object schema |
+| `object(Fields, Opts)` | Build with options |
+| `field(Name, Type)` | Define a field |
+| `field(Name, Type, Opts)` | Define with options (`required`, `{doc, _}`, etc.) |
+| `string()`, `integer()`, `number()`, `boolean()` | Type constructors |
+| `array(ItemSchema)` | Array type |
+| `enum(Values)` | Enum type |
+| `any_of(Schemas)` | Union type |
+| `validate(Schema, Data)` | Validate data against schema via jesse |
 
-%% Add tool with JSON Schema validation
--spec add_tool_with_schema(Server, Name, Handler, Schema) -> ok.
-Schema :: map()  % JSON Schema
-
-%% Example
-Schema = #{
-    <<"type">> => <<"object">>,
-    <<"properties">> => #{
-        <<"x">> => #{<<"type">> => <<"number">>},
-        <<"y">> => #{<<"type">> => <<"number">>}
-    },
-    <<"required">> => [<<"x">>, <<"y">>]
-},
-erlmcp_server:add_tool_with_schema(Server, <<"add">>,
-    fun(#{<<"x">> := X, <<"y">> := Y}) ->
-        #mcp_content{
-            type = <<"text">>,
-            text = float_to_binary(X + Y)
-        }
-    end, Schema).
-```
-
-### Prompt Management
+## Handler Behaviour (`erlmcp_server_handler`)
 
 ```erlang
-%% Add simple prompt
--spec add_prompt(Server, Name, Handler) -> ok.
-
-%% Add prompt with arguments
--spec add_prompt_with_args(Server, Name, Handler, Arguments) -> ok.
-Arguments :: [#mcp_prompt_argument{}]
-
-%% Example
-Args = [
-    #mcp_prompt_argument{
-        name = <<"language">>,
-        description = <<"Programming language">>,
-        required = true
-    }
-],
-erlmcp_server:add_prompt_with_args(Server, <<"code_template">>,
-    fun(#{<<"language">> := Lang}) ->
-        [#{
-            <<"role">> => <<"system">>,
-            <<"content">> => <<"You are an expert ", Lang/binary, " programmer.">>
-        }]
-    end, Args).
+-callback tools() -> [map()].
+-callback handle_tool(binary(), map(), erlmcp_ctx:ctx()) ->
+    {ok, term()} | {error, integer(), binary()}.
 ```
 
-### Notifications
+## Callback Behaviours
+
+### `erlmcp_sampling`
 
 ```erlang
-%% Subscribe to resource updates
--spec subscribe_resource(Server, Uri, Subscriber) -> ok.
-
-%% Send notifications
--spec notify_resource_updated(Server, Uri, Metadata) -> ok.
--spec notify_resources_changed(Server) -> ok.
-
-%% Progress reporting
--spec report_progress(Server, Token, Progress, Total) -> ok.
+-callback handle_create_message(map(), erlmcp_ctx:ctx()) ->
+    {ok, map()} | {error, term()}.
 ```
 
-## Type Definitions
-
-### Content Types
+### `erlmcp_roots`
 
 ```erlang
-#mcp_content{
-    type :: binary(),           % "text" | "image" | "binary"
-    text :: binary() | undefined,
-    data :: binary() | undefined,  % Base64 for binary content
-    mime_type :: binary() | undefined
-}
+-callback list_roots(erlmcp_ctx:ctx()) ->
+    {ok, [map()]} | {error, term()}.
 ```
 
-### Resource Types
+### `erlmcp_elicitation`
 
 ```erlang
-#mcp_resource{
-    uri :: binary(),
-    name :: binary(), 
-    description :: binary() | undefined,
-    mime_type :: binary() | undefined,
-    metadata :: map() | undefined
-}
-
-#mcp_resource_template{
-    uri_template :: binary(),
-    name :: binary(),
-    description :: binary() | undefined,
-    mime_type :: binary() | undefined
-}
+-callback handle_elicit(map(), erlmcp_ctx:ctx()) ->
+    {ok, map()} | {error, term()}.
 ```
 
-### Tool Types
+## Context (`erlmcp_ctx`)
+
+| Function | Description |
+|----------|-------------|
+| `new(Opts)` | Create a new context |
+| `session(Ctx)` | Get the session pid |
+| `request_id(Ctx)` | Get the request id |
+| `report_progress(Ctx, Fraction, Msg)` | Report progress to client |
+| `request_peer(Ctx, Method, Params)` | Issue a request to the peer |
+
+## Transport Behaviour (`erlmcp_transport`)
 
 ```erlang
-#mcp_tool{
-    name :: binary(),
-    description :: binary(),
-    input_schema :: map() | undefined  % JSON Schema
-}
+-callback init(TransportId, Config) -> {ok, state()} | {error, term()}.
+-callback send(state(), iodata()) -> ok | {error, term()}.
+-callback close(state()) -> ok.
+-callback get_info(state()) -> map().           %% optional
+-callback handle_transport_call(Request, state()) -> ...  %% optional
 ```
 
-### Prompt Types
-
-```erlang
-#mcp_prompt{
-    name :: binary(),
-    description :: binary() | undefined,
-    arguments :: [#mcp_prompt_argument{}] | undefined
-}
-
-#mcp_prompt_argument{
-    name :: binary(),
-    description :: binary() | undefined,
-    required :: boolean()
-}
-```
-
-## Error Handling
-
-Common error returns:
-
-```erlang
-{error, not_initialized}
-{error, capability_not_supported} 
-{error, {tcp_error, Reason}}
-{error, {invalid_response, Data}}
-{error, {error_response, #{<<"code">> => Code, <<"message">> => Message}}}
-```
-
-## Examples
-
-See the [examples directory](../examples/) for complete working examples.
+Implementations: `erlmcp_transport_stdio`, `_tcp`, `_http`,
+`_streamable_http`. Each exports `validate_config/1`.

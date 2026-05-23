@@ -47,6 +47,10 @@ built on the Inaka/OTP rubric captured in `docs/0.6.0/planning/phase0-erlang-rub
 - **No shared records** across module boundaries or in exported specs; opaque types
   + accessor functions.
 - **No `_new` forks; no macros for logic** (house style). One way to do a thing.
+- **Release discipline:** SemVer + published release notes (GitHub releases) + the
+  git history. **No hand-maintained `CHANGELOG`** — it's a holdover from before
+  queryable version control; the git log and published release notes cover it. Don't
+  write a CHANGELOG requirement into ledgers or docs checklists.
 
 ## How we work (process rigour)
 
