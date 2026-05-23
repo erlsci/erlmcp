@@ -214,6 +214,79 @@ log_message_test() ->
     ?assertEqual(<<"info">>, maps:get(<<"level">>, Params)),
     gen_statem:stop(Server).
 
+%%====================================================================
+%% Facade transport/server management (via app)
+%%====================================================================
+
+stop_server_running_test() ->
+    {ok, _} = application:ensure_all_started(erlmcp),
+    {ok, Pid} = erlmcp:start_server(test_stop_srv),
+    ok = erlmcp_registry:register_server(test_stop_srv, Pid, #{}),
+    ?assert(is_process_alive(Pid)),
+    ok = erlmcp:stop_server(test_stop_srv),
+    ok = application:stop(erlmcp),
+    timer:sleep(100).
+
+bind_unbind_test() ->
+    {ok, _} = application:ensure_all_started(erlmcp),
+    {ok, ServerPid} = erlmcp:start_server(bind_test_srv),
+    ok = erlmcp_registry:register_server(bind_test_srv, ServerPid, #{}),
+    {ok, TransPid} = erlmcp:start_transport(bind_test_t, stdio,
+        #{session => self(), test_mode => true}),
+    ok = erlmcp_registry:register_transport(bind_test_t, TransPid, #{}),
+    ok = erlmcp:bind_transport_to_server(bind_test_t, bind_test_srv),
+    ok = erlmcp:unbind_transport(bind_test_t),
+    erlmcp_transport_stdio:close(TransPid),
+    ok = erlmcp:stop_server(bind_test_srv),
+    ok = application:stop(erlmcp),
+    timer:sleep(100).
+
+list_servers_running_test() ->
+    {ok, _} = application:ensure_all_started(erlmcp),
+    {ok, Pid} = erlmcp:start_server(ls_test_srv),
+    ok = erlmcp_registry:register_server(ls_test_srv, Pid, #{}),
+    Servers = erlmcp:list_servers(),
+    ?assert(length(Servers) >= 1),
+    erlmcp:stop_server(ls_test_srv),
+    ok = application:stop(erlmcp),
+    timer:sleep(100).
+
+list_transports_running_test() ->
+    {ok, _} = application:ensure_all_started(erlmcp),
+    {ok, TransPid} = erlmcp:start_transport(lt_test, stdio,
+        #{session => self(), test_mode => true}),
+    ok = erlmcp_registry:register_transport(lt_test, TransPid, #{}),
+    Transports = erlmcp:list_transports(),
+    ?assert(length(Transports) >= 1),
+    ok = application:stop(erlmcp),
+    timer:sleep(100).
+
+stop_transport_running_test() ->
+    {ok, _} = application:ensure_all_started(erlmcp),
+    {ok, TransPid} = erlmcp:start_transport(st_test, stdio,
+        #{session => self(), test_mode => true}),
+    ok = erlmcp_registry:register_transport(st_test, TransPid, #{}),
+    ok = erlmcp:stop_transport(st_test),
+    ok = application:stop(erlmcp),
+    timer:sleep(100).
+
+start_stop_transport_stdio_test() ->
+    {ok, Pid} = erlmcp:start_transport(test_t, stdio, #{
+        session => self(), test_mode => true
+    }),
+    ?assert(is_process_alive(Pid)),
+    erlmcp_transport_stdio:close(Pid).
+
+notify_resource_updated_test() ->
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => self(),
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    erlmcp:notify_resource_updated(Server, <<"test://x">>),
+    timer:sleep(50),
+    ?assert(is_process_alive(Server)),
+    gen_statem:stop(Server).
+
 init_server_with_transport(Server) ->
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,

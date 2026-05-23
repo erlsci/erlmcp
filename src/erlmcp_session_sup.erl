@@ -15,5 +15,10 @@ init([]) ->
         #{strategy => simple_one_for_one,
           intensity => 5,
           period => 60},
-    ChildSpecs = [],
-    {ok, {SupFlags, ChildSpecs}}.
+    ChildSpec =
+        #{id => session,
+          start => {erlmcp_server_session, start_link, []},
+          restart => temporary,
+          shutdown => 5000,
+          type => worker},
+    {ok, {SupFlags, [ChildSpec]}}.

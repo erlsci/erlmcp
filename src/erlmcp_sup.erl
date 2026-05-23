@@ -21,7 +21,8 @@ start_link() ->
 %% Server management API
 -spec start_server(atom(), #{}) -> {ok, pid()} | {error, term()}.
 start_server(ServerId, Config) ->
-    case supervisor:start_child(erlmcp_server_sup, [ServerId, Config]) of
+    Opts = Config#{name => atom_to_binary(ServerId, utf8)},
+    case supervisor:start_child(erlmcp_server_sup, [Opts]) of
         {ok, ServerPid} ->
             % Register with registry
             ok = erlmcp_registry:register_server(ServerId, ServerPid, Config),
@@ -43,7 +44,7 @@ stop_server(ServerId) ->
 %% Transport management API
 -spec start_transport(atom(), atom(), #{}) -> {ok, pid()} | {error, term()}.
 start_transport(TransportId, Type, Config) ->
-    case supervisor:start_child(erlmcp_transport_sup, [TransportId, Type, Config]) of
+    case erlmcp_transport_sup:start_child(TransportId, Type, Config) of
         {ok, TransportPid} ->
             TransportConfig = Config#{type => Type},
             ok = erlmcp_registry:register_transport(TransportId, TransportPid, TransportConfig),
@@ -84,7 +85,7 @@ stop_stdio_server() ->
 -spec init([]) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
     SupFlags =
-        #{strategy => one_for_all,  % If registry fails, restart everything
+        #{strategy => one_for_all,
           intensity => 3,
           period => 60},
 
