@@ -8,14 +8,16 @@
 %% API
 -export([start_link/2, simulate_input/2, validate_config/1]).
 
+%% Testable pure functions
+-export([process_raw_input/1, prepare_line/1]).
+
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -record(state, {
     transport_id :: erlmcp_transport:transport_id(),
     session :: pid() | undefined,
-    reader :: pid() | undefined,
-    test_mode = false :: boolean()
+    reader :: pid() | undefined
 }).
 
 %%====================================================================
@@ -53,24 +55,52 @@ validate_config(_) ->
     {error, not_a_map}.
 
 %%====================================================================
+%% Pure functions (testable without I/O)
+%%====================================================================
+
+-spec process_raw_input(term()) -> {deliver, binary()} | eof | {error, term()}.
+process_raw_input(eof) ->
+    eof;
+process_raw_input({error, Reason}) ->
+    {error, Reason};
+process_raw_input(Line) when is_list(Line) ->
+    {deliver, iolist_to_binary(Line)};
+process_raw_input(Line) when is_binary(Line) ->
+    {deliver, Line}.
+
+-spec prepare_line(binary()) -> {send, binary()} | skip.
+prepare_line(RawLine) ->
+    case trim_trailing_crlf(RawLine) of
+        <<>> -> skip;
+        Trimmed -> {send, Trimmed}
+    end.
+
+trim_trailing_crlf(<<>>) -> <<>>;
+trim_trailing_crlf(Bin) ->
+    case binary:last(Bin) of
+        $\n -> trim_trailing_crlf(binary:part(Bin, 0, byte_size(Bin) - 1));
+        $\r -> trim_trailing_crlf(binary:part(Bin, 0, byte_size(Bin) - 1));
+        _ -> Bin
+    end.
+
+%%====================================================================
 %% gen_server callbacks
 %%====================================================================
 
 init({TransportId, Config}) ->
     process_flag(trap_exit, true),
     Session = maps:get(session, Config, undefined),
-    TestMode = maps:get(test_mode, Config, false),
+    ReadFun = maps:get(read_fun, Config, fun default_read/0),
     State = #state{
         transport_id = TransportId,
-        session = Session,
-        test_mode = TestMode
+        session = Session
     },
-    case TestMode of
+    case maps:get(test_mode, Config, false) of
         true ->
             {ok, State};
         false ->
             Self = self(),
-            ReaderPid = spawn_link(fun() -> read_loop(Self) end),
+            ReaderPid = spawn_link(fun() -> read_loop(Self, ReadFun) end),
             {ok, State#state{reader = ReaderPid}}
     end.
 
@@ -127,25 +157,22 @@ write_stdout(Data) ->
         error:Reason -> {error, {io_error, Reason}}
     end.
 
--spec read_loop(pid()) -> no_return().
-read_loop(Parent) ->
-    case io:get_line("") of
+default_read() ->
+    io:get_line("").
+
+read_loop(Parent, ReadFun) ->
+    case process_raw_input(ReadFun()) of
         eof ->
             exit(normal);
         {error, Reason} ->
             exit({read_error, Reason});
-        Line when is_list(Line) ->
-            deliver_line(Parent, iolist_to_binary(Line)),
-            read_loop(Parent);
-        Line when is_binary(Line) ->
-            deliver_line(Parent, Line),
-            read_loop(Parent)
+        {deliver, Data} ->
+            deliver_line(Parent, Data),
+            read_loop(Parent, ReadFun)
     end.
 
--spec deliver_line(pid(), binary()) -> ok.
-deliver_line(Parent, Line) ->
-    Trimmed = string:trim(Line, trailing, "\r\n"),
-    case Trimmed of
-        <<>> -> ok;
-        _ -> Parent ! {line, Trimmed}, ok
+deliver_line(Parent, RawLine) ->
+    case prepare_line(RawLine) of
+        skip -> ok;
+        {send, Trimmed} -> Parent ! {line, Trimmed}, ok
     end.
