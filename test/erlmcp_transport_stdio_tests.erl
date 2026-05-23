@@ -82,3 +82,14 @@ terminate_test() ->
     receive {'DOWN', Ref, process, Pid, _} -> ok
     after 2000 -> ?assert(false)
     end.
+
+line_delivery_test() ->
+    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
+        session => self(), test_mode => true
+    }),
+    Pid ! {line, <<"hello">>},
+    receive {transport_data, <<"hello">>} -> ok
+    after 1000 -> ?assert(false)
+    end,
+    erlmcp_transport_stdio:close(Pid).
+

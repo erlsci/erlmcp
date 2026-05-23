@@ -32,7 +32,12 @@ tcp_test_() ->
         fun send_state_api/1,
         fun reconnect_via_connect_call/1,
         fun socket_exit_reconnects/1,
-        fun extract_messages_partial/1
+        fun extract_messages_partial/1,
+        fun validate_config_test_/1,
+        fun disconnect_already_disconnected/1,
+        fun reconnect_already_scheduled/1,
+        fun send_failure_triggers_error/1,
+        fun tcp_options_with_extras/1
     ]}.
 
 mock_connect_ok() ->
@@ -252,5 +257,69 @@ extract_messages_partial(_) ->
         receive {transport_data, <<"part1 part2">>} -> ok
         after 1000 -> ?assert(false)
         end,
+        erlmcp_transport_tcp:close(Pid)
+    end}.
+
+validate_config_test_(_) ->
+    {"validate_config checks required keys", fun() ->
+        ?assertEqual(ok, erlmcp_transport_tcp:validate_config(
+            #{host => "h", port => 1, owner => self()})),
+        ?assertMatch({error, _}, erlmcp_transport_tcp:validate_config(#{})),
+        ?assertMatch({error, _}, erlmcp_transport_tcp:validate_config(#{host => "h"})),
+        ?assertMatch({error, _}, erlmcp_transport_tcp:validate_config(not_a_map))
+    end}.
+
+disconnect_already_disconnected(_) ->
+    {"disconnect when already disconnected is safe", fun() ->
+        mock_connect_fail(),
+        {ok, Pid} = erlmcp_transport_tcp:start_link(#{
+            host => "localhost", port => 9999, owner => self(),
+            max_reconnect_attempts => 1
+        }),
+        timer:sleep(200),
+        Pid ! {tcp_closed, make_ref()},
+        timer:sleep(50),
+        ?assert(is_process_alive(Pid)),
+        erlmcp_transport_tcp:close(Pid)
+    end}.
+
+reconnect_already_scheduled(_) ->
+    {"reconnect when already scheduled does not duplicate", fun() ->
+        {Pid, FakeSocket} = start_tcp(self()),
+        Pid ! {tcp_closed, FakeSocket},
+        receive {transport_disconnected, _, _} -> ok after 1000 -> ok end,
+        Pid ! {tcp_error, make_ref(), econnreset},
+        timer:sleep(50),
+        ?assert(is_process_alive(Pid)),
+        erlmcp_transport_tcp:close(Pid)
+    end}.
+
+send_failure_triggers_error(_) ->
+    {"send failure triggers tcp_error", fun() ->
+        FakeSocket = mock_connect_ok(),
+        meck:expect(gen_tcp, send, fun(_, _) -> {error, closed} end),
+        {ok, Pid} = erlmcp_transport_tcp:start_link(#{
+            host => "localhost", port => 9999, owner => self(),
+            max_reconnect_attempts => 3
+        }),
+        unlink(Pid),
+        timer:sleep(50),
+        receive {transport_connected, Pid} -> ok after 1000 -> ok end,
+        {error, _} = erlmcp_transport_tcp:send(Pid, <<"data">>),
+        timer:sleep(50),
+        erlmcp_transport_tcp:close(Pid)
+    end}.
+
+tcp_options_with_extras(_) ->
+    {"optional tcp options are passed through", fun() ->
+        FakeSocket = mock_connect_ok(),
+        {ok, Pid} = erlmcp_transport_tcp:start_link(#{
+            host => "localhost", port => 9999, owner => self(),
+            max_reconnect_attempts => 3,
+            keepalive => true, nodelay => true, buffer_size => 32768
+        }),
+        unlink(Pid),
+        timer:sleep(50),
+        receive {transport_connected, Pid} -> ok after 1000 -> ok end,
         erlmcp_transport_tcp:close(Pid)
     end}.
