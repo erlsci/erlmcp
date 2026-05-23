@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 %% Transport API
--export([send/2, close/1]).
+-export([send/2, close/1, validate_config/1]).
 %% API
 -export([start_link/1, connect/2]).
 %% gen_server callbacks
@@ -72,6 +72,17 @@ close(#{socket := Socket}) when Socket =/= undefined ->
     gen_tcp:close(Socket);
 close(_) ->
     ok.
+
+-spec validate_config(map()) -> ok | {error, term()}.
+validate_config(Config) when is_map(Config) ->
+    Required = [host, port, owner],
+    Missing = [K || K <- Required, not maps:is_key(K, Config)],
+    case Missing of
+        [] -> ok;
+        _ -> {error, {missing_keys, Missing}}
+    end;
+validate_config(_) ->
+    {error, not_a_map}.
 
 %%====================================================================
 %% gen_server callbacks

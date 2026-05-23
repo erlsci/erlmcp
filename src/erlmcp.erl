@@ -22,6 +22,8 @@
 -export([add_prompt/2, remove_prompt/2]).
 %% Logging (M2b)
 -export([log_message/4]).
+%% Convenience setup (M4)
+-export([start_stdio_setup/2, start_tcp_setup/3, start_http_setup/3]).
 
 %% Types
 -type server_id() :: atom().
@@ -260,4 +262,34 @@ remove_prompt(Session, Name) when is_pid(Session), is_binary(Name) ->
 -spec log_message(pid(), atom(), binary(), term()) -> ok.
 log_message(Session, Level, Logger, Data) when is_pid(Session), is_atom(Level) ->
     erlmcp_server_session:emit_log(Session, Level, Logger, Data).
+
+%%====================================================================
+%% Convenience setup (M4)
+%%====================================================================
+
+-spec start_stdio_setup(atom(), map()) -> {ok, #{server := pid(), transport := pid()}}.
+start_stdio_setup(ServerId, Config) ->
+    {ok, Server} = start_server(ServerId, Config),
+    TransId = list_to_atom(atom_to_list(ServerId) ++ "_stdio"),
+    {ok, Transport} = start_transport(TransId, stdio,
+        #{session => Server, test_mode => maps:get(test_mode, Config, false)}),
+    {ok, #{server => Server, transport => Transport}}.
+
+-spec start_tcp_setup(atom(), map(), map()) ->
+    {ok, #{server := pid(), transport := pid()}}.
+start_tcp_setup(ServerId, ServerConfig, TcpConfig) ->
+    {ok, Server} = start_server(ServerId, ServerConfig),
+    TransId = list_to_atom(atom_to_list(ServerId) ++ "_tcp"),
+    {ok, Transport} = erlmcp_transport_tcp:start_link(
+        TcpConfig#{owner => Server}),
+    {ok, #{server => Server, transport => Transport, transport_id => TransId}}.
+
+-spec start_http_setup(atom(), map(), map()) ->
+    {ok, #{server := pid(), transport := pid()}}.
+start_http_setup(ServerId, ServerConfig, HttpConfig) ->
+    {ok, Server} = start_server(ServerId, ServerConfig),
+    TransId = list_to_atom(atom_to_list(ServerId) ++ "_http"),
+    {ok, Transport} = erlmcp_transport_streamable_http:start_link(
+        HttpConfig#{session => Server}),
+    {ok, #{server => Server, transport => Transport, transport_id => TransId}}.
 

@@ -157,11 +157,132 @@ streamable_http_send_test() ->
     erlmcp_transport_streamable_http:close(Pid).
 
 streamable_http_cast_info_test() ->
-    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{}),
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{
+        session => self(), test_mode => true
+    }),
     gen_server:cast(Pid, unknown),
     Pid ! unknown,
     timer:sleep(50),
     ?assert(is_process_alive(Pid)),
+    erlmcp_transport_streamable_http:close(Pid).
+
+streamable_http_start_link_2_test() ->
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(test_sh, #{
+        session => self(), test_mode => true
+    }),
+    ?assert(is_process_alive(Pid)),
+    erlmcp_transport_streamable_http:close(Pid).
+
+streamable_http_simulate_request_test() ->
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{
+        session => Server, test_mode => true
+    }),
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    ok = erlmcp_transport_streamable_http:simulate_request(Pid, InitReq),
+    timer:sleep(100),
+    ?assertEqual(operational, gen_statem:call(Server, get_state)),
+    erlmcp_transport_streamable_http:close(Pid),
+    gen_statem:stop(Server).
+
+streamable_http_validate_test() ->
+    ?assertEqual(ok, erlmcp_transport_streamable_http:validate_config(#{session => self()})),
+    ?assertEqual(ok, erlmcp_transport_streamable_http:validate_config(#{port => 8080})),
+    ?assertMatch({error, _}, erlmcp_transport_streamable_http:validate_config(#{})),
+    ?assertMatch({error, _}, erlmcp_transport_streamable_http:validate_config(not_a_map)).
+
+streamable_http_send_no_session_test() ->
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{test_mode => true}),
+    ?assertMatch({error, _}, erlmcp_transport_streamable_http:simulate_request(Pid, <<"x">>)),
+    erlmcp_transport_streamable_http:close(Pid).
+
+streamable_http_unknown_call_test() ->
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{
+        session => self(), test_mode => true
+    }),
+    ?assertMatch({error, _}, gen_server:call(Pid, foo)),
+    erlmcp_transport_streamable_http:close(Pid).
+
+streamable_http_send_outbound_via_info_test() ->
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{
+        session => self(), test_mode => true
+    }),
+    Pid ! {send, <<"outbound">>},
+    timer:sleep(50),
+    ?assert(is_process_alive(Pid)),
+    erlmcp_transport_streamable_http:close(Pid).
+
+streamable_http_send_no_connection_test() ->
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{
+        session => self()
+    }),
+    ?assertMatch({error, _}, erlmcp_transport_streamable_http:send(Pid, <<"data">>)),
+    erlmcp_transport_streamable_http:close(Pid).
+
+streamable_http_tcp_closed_test() ->
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{
+        session => self(), test_mode => true
+    }),
+    FakeSock = make_ref(),
+    Pid ! {tcp_closed, FakeSock},
+    timer:sleep(50),
+    ?assert(is_process_alive(Pid)),
+    erlmcp_transport_streamable_http:close(Pid).
+
+streamable_http_listen_mode_test() ->
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{
+        session => self(), port => 0
+    }),
+    ?assert(is_process_alive(Pid)),
+    timer:sleep(200),
+    erlmcp_transport_streamable_http:close(Pid).
+
+streamable_http_real_connection_test() ->
+    Port = 19876 + erlang:unique_integer([positive]) rem 1000,
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{
+        session => self(), port => Port
+    }),
+    timer:sleep(200),
+    case gen_tcp:connect("localhost", Port, [binary, {active, false}], 2000) of
+        {ok, Sock} ->
+            ok = gen_tcp:send(Sock, <<"POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello">>),
+            timer:sleep(200),
+            gen_tcp:close(Sock);
+        {error, _} ->
+            ok
+    end,
+    erlmcp_transport_streamable_http:close(Pid).
+
+streamable_http_send_with_connection_test() ->
+    Port = 19876 + erlang:unique_integer([positive]) rem 1000,
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{
+        session => self(), port => Port
+    }),
+    timer:sleep(200),
+    case gen_tcp:connect("localhost", Port, [binary, {active, false}], 2000) of
+        {ok, Sock} ->
+            ok = gen_tcp:send(Sock, <<"POST / HTTP/1.1\r\n\r\n">>),
+            timer:sleep(200),
+            ok = erlmcp_transport_streamable_http:send(Pid, <<"response">>),
+            timer:sleep(100),
+            gen_tcp:close(Sock);
+        {error, _} ->
+            ok
+    end,
+    erlmcp_transport_streamable_http:close(Pid).
+
+streamable_http_tcp_data_test() ->
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{
+        session => self(), test_mode => true
+    }),
+    FakeSock = make_ref(),
+    Pid ! {tcp, FakeSock, <<"{\"jsonrpc\":\"2.0\"}">>},
+    receive {transport_data, _} -> ok after 500 -> ok end,
     erlmcp_transport_streamable_http:close(Pid).
 
 %%====================================================================

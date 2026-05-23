@@ -1,6 +1,6 @@
 -module(erlmcp_conformance).
 
--export([run_server_scorecard/0, run_client_scorecard/0]).
+-export([run_server_scorecard/0, run_client_scorecard/0, run_transport_scorecard/0]).
 
 -define(SCENARIOS, [
     %% L0 — protocol basics
@@ -667,6 +667,117 @@ cs_inbound_unknown(_) ->
     R = erlmcp_client_session:call_tool(C, <<"u">>, #{}),
     erlmcp_client_session:stop(C),
     case R of {ok, _} -> pass; _ -> fail end.
+
+%%====================================================================
+%% Transport scorecard (M4)
+%%====================================================================
+
+-define(TRANSPORT_SCENARIOS, [
+    {t0, <<"stdio_start_stop">>, fun ts_stdio_start_stop/1},
+    {t0, <<"stdio_send">>, fun ts_stdio_send/1},
+    {t0, <<"stdio_validate_config">>, fun ts_stdio_validate/1},
+    {t0, <<"stdio_session_delivery">>, fun ts_stdio_delivery/1},
+    {t0, <<"streamable_start_stop">>, fun ts_stream_start_stop/1},
+    {t0, <<"streamable_send">>, fun ts_stream_send/1},
+    {t0, <<"streamable_validate_config">>, fun ts_stream_validate/1},
+    {t0, <<"tcp_validate_config">>, fun ts_tcp_validate/1},
+    {t0, <<"http_validate_config">>, fun ts_http_validate/1}
+]).
+
+-spec run_transport_scorecard() -> {float(), [{atom(), binary(), pass | fail}]}.
+run_transport_scorecard() ->
+    Results = lists:map(fun({Level, Name, ScenarioFun}) ->
+        try ScenarioFun(unused) of
+            pass -> {Level, Name, pass};
+            fail -> {Level, Name, fail}
+        catch _:_ ->
+            {Level, Name, fail}
+        end
+    end, ?TRANSPORT_SCENARIOS),
+    Passed = length([ok || {_, _, pass} <- Results]),
+    Total = length(Results),
+    Score = (Passed / Total) * 100,
+    {Score, Results}.
+
+ts_stdio_start_stop(_) ->
+    {ok, Pid} = erlmcp_transport_stdio:start_link(test, #{
+        session => self(), test_mode => true}),
+    erlmcp_transport_stdio:close(Pid),
+    pass.
+
+ts_stdio_send(_) ->
+    {ok, Pid} = erlmcp_transport_stdio:start_link(test, #{
+        session => self(), test_mode => true}),
+    R = erlmcp_transport_stdio:send(Pid, <<"data">>),
+    erlmcp_transport_stdio:close(Pid),
+    case R of ok -> pass; _ -> fail end.
+
+ts_stdio_validate(_) ->
+    case erlmcp_transport_stdio:validate_config(#{session => self()}) of
+        ok ->
+            case erlmcp_transport_stdio:validate_config(#{}) of
+                {error, _} -> pass;
+                _ -> fail
+            end;
+        _ -> fail
+    end.
+
+ts_stdio_delivery(_) ->
+    {ok, S} = erlmcp_server_session:start_link(#{
+        name => <<"t">>, version => <<"1.0">>, capabilities => #{}}),
+    {ok, Pid} = erlmcp_transport_stdio:start_link(test, #{
+        session => S, test_mode => true}),
+    Init = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>, <<"capabilities">> => #{}}),
+    erlmcp_transport_stdio:simulate_input(Pid, Init),
+    timer:sleep(100),
+    R = gen_statem:call(S, get_state),
+    erlmcp_transport_stdio:close(Pid),
+    gen_statem:stop(S),
+    case R of operational -> pass; _ -> fail end.
+
+ts_stream_start_stop(_) ->
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{
+        session => self(), test_mode => true}),
+    erlmcp_transport_streamable_http:close(Pid),
+    pass.
+
+ts_stream_send(_) ->
+    {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{
+        session => self(), test_mode => true}),
+    R = erlmcp_transport_streamable_http:send(Pid, <<"data">>),
+    erlmcp_transport_streamable_http:close(Pid),
+    case R of ok -> pass; _ -> fail end.
+
+ts_stream_validate(_) ->
+    case erlmcp_transport_streamable_http:validate_config(#{session => self()}) of
+        ok ->
+            case erlmcp_transport_streamable_http:validate_config(not_a_map) of
+                {error, _} -> pass;
+                _ -> fail
+            end;
+        _ -> fail
+    end.
+
+ts_tcp_validate(_) ->
+    case erlmcp_transport_tcp:validate_config(#{host => "h", port => 1, owner => self()}) of
+        ok ->
+            case erlmcp_transport_tcp:validate_config(#{}) of
+                {error, _} -> pass;
+                _ -> fail
+            end;
+        _ -> fail
+    end.
+
+ts_http_validate(_) ->
+    case erlmcp_transport_http:validate_config(#{url => "http://x", owner => self()}) of
+        ok ->
+            case erlmcp_transport_http:validate_config(#{}) of
+                {error, _} -> pass;
+                _ -> fail
+            end;
+        _ -> fail
+    end.
 
 %%====================================================================
 %% Helpers

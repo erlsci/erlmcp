@@ -287,6 +287,22 @@ notify_resource_updated_test() ->
     ?assert(is_process_alive(Server)),
     gen_statem:stop(Server).
 
+start_stdio_setup_test() ->
+    {ok, #{server := Server, transport := Transport}} =
+        erlmcp:start_stdio_setup(setup_test_srv, #{test_mode => true}),
+    ?assert(is_process_alive(Server)),
+    ?assert(is_process_alive(Transport)),
+    erlmcp_transport_stdio:close(Transport),
+    gen_statem:stop(Server).
+
+start_http_setup_test() ->
+    {ok, #{server := Server, transport := Transport}} =
+        erlmcp:start_http_setup(http_test_srv, #{}, #{test_mode => true}),
+    ?assert(is_process_alive(Server)),
+    ?assert(is_process_alive(Transport)),
+    erlmcp_transport_streamable_http:close(Transport),
+    gen_statem:stop(Server).
+
 init_server_with_transport(Server) ->
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,

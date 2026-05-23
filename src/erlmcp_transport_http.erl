@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 %% Transport behavior callbacks
--export([send/2, close/1]).
+-export([send/2, close/1, validate_config/1]).
 %% API
 -export([start_link/1]).
 %% gen_server callbacks
@@ -48,6 +48,15 @@
 -define(DEFAULT_RETRY_DELAY, 1000).
 -define(DEFAULT_POOL_SIZE, 5).
 -define(DEFAULT_METHOD, post).
+
+-spec validate_config(map()) -> ok | {error, term()}.
+validate_config(Config) when is_map(Config) ->
+    case maps:is_key(url, Config) andalso maps:is_key(owner, Config) of
+        true -> ok;
+        false -> {error, {missing_keys, [K || K <- [url, owner], not maps:is_key(K, Config)]}}
+    end;
+validate_config(_) ->
+    {error, not_a_map}.
 
 %%====================================================================
 %% Transport Behavior Implementation
