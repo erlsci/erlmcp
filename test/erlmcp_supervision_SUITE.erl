@@ -11,13 +11,18 @@
     server_sup_standalone/1,
     transport_sup_standalone/1,
     sup_start_stop_server/1,
-    sup_start_stop_transport/1
+    sup_start_stop_transport/1,
+    sup_start_stop_transport_full/1,
+    transport_sup_tcp_type/1,
+    transport_sup_http_type/1
 ]).
 
 all() ->
     [app_starts_sups, sup_children,
      session_sup_standalone, server_sup_standalone, transport_sup_standalone,
      sup_start_stop_server, sup_start_stop_transport,
+     sup_start_stop_transport_full,
+     transport_sup_tcp_type, transport_sup_http_type,
      transport_sup_start_child,
      sup_start_server_via_facade].
 
@@ -115,4 +120,27 @@ sup_start_transport_via_facade(Config) ->
     ?assert(is_process_alive(TransPid)),
     ok = erlmcp_sup:stop_transport(test_facade_trans),
     timer:sleep(100),
+    _ = Config.
+
+sup_start_stop_transport_full(Config) ->
+    {ok, _} = application:ensure_all_started(erlmcp),
+    {ok, _TransPid} = erlmcp_sup:start_transport(full_t, stdio,
+        #{session => self(), test_mode => true}),
+    ok = erlmcp_sup:stop_transport(full_t),
+    ?assertEqual(ok, erlmcp_sup:stop_transport(nonexistent_t)),
+    _ = Config.
+
+transport_sup_tcp_type(Config) ->
+    {ok, _} = application:ensure_all_started(erlmcp),
+    {ok, _TcpPid} = erlmcp_sup:start_transport(tcp_t, tcp,
+        #{host => "localhost", port => 1, owner => self(),
+          max_reconnect_attempts => 0}),
+    ok = erlmcp_sup:stop_transport(tcp_t),
+    _ = Config.
+
+transport_sup_http_type(Config) ->
+    {ok, _} = application:ensure_all_started(erlmcp),
+    {ok, _HttpPid} = erlmcp_sup:start_transport(http_t, http,
+        #{url => "http://localhost:1/mcp", owner => self()}),
+    ok = erlmcp_sup:stop_transport(http_t),
     _ = Config.

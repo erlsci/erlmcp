@@ -56,9 +56,9 @@ start_transport(TransportId, Type, Config) ->
 -spec stop_transport(atom()) -> ok | {error, term()}.
 stop_transport(TransportId) ->
     case erlmcp_registry:find_transport(TransportId) of
-        {ok, {TransportPid, _Config}} ->
+        {ok, {_TransportPid, _Config}} ->
             ok = erlmcp_registry:unregister_transport(TransportId),
-            supervisor:terminate_child(erlmcp_transport_sup, TransportPid);
+            supervisor:terminate_child(erlmcp_transport_sup, TransportId);
         {error, not_found} ->
             ok
     end.

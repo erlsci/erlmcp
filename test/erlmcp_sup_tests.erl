@@ -64,3 +64,4 @@ sup_stop_stdio_test() ->
     ?assertEqual(ok, erlmcp_sup:stop_stdio_server()),
     ok = application:stop(erlmcp),
     timer:sleep(100).
+

@@ -284,12 +284,44 @@ B (specs/coverage). DoD: docs verified against code; release/security automation
 ### M6 — Native-strength features · **P1/P2**
 *Goal: the places erlmcp can exceed rmcp (Phase 2 §12).*
 
-- **Tasks** (long-running): `tasks/get|list|result|cancel` as supervised task
-  processes + per-tool task support.
-- `_meta` channel end-to-end; icons; graceful batch tolerance hardening.
+**Split into M6a + M6b** (2026-05-23): M6 bundles the meaty Tasks feature (a new
+supervised, long-lived process lifecycle distinct from M1's ephemeral worker) with
+three small protocol-completeness loose ends — ~16–17 rows, the same split territory
+as M2/M3/M5. The seam: M6a is the Tasks feature; M6b is the 0.6.0 finish line
+(`_meta`/icons/batch + the final empty `cover_excl_mods`). M6b depends on M6a.
 
-Closes: A (tasks, _meta, batch). DoD: a long-running tool reports via tasks and can
-be cancelled mid-flight; conformance covers tasks.
+#### M6a — Tasks (supervised long-running execution)
+*Ledger: `milestones/M6a-tasks-ledger.md`. Depends on M1 (worker/ctx/cancellation) +
+M2a (`add_tool` map, `tools/call`).*
+
+- **Supervised task processes:** `erlmcp_task` (a long-lived `gen_server` holding task
+  lifecycle state — running/completed/failed/cancelled, progress, result — distinct
+  from the ephemeral per-request worker) under `erlmcp_task_sup` (`simple_one_for_one`).
+- **Per-tool task support:** `taskSupport` (`forbidden`/`optional`/`required`,
+  protocol-native `ToolExecution.taskSupport`) on the `add_tool` map, surfaced in
+  `tools/list`; a `tasks` capability advertised when a task-supporting tool exists.
+- **Task surface:** `tools/call` task-augmented execution spawns a supervised task and
+  returns a task id; `tasks/get` (status+progress), `tasks/list`, `tasks/result`,
+  `tasks/cancel` (cancellation-as-exit: terminate mid-flight, no late result). Progress
+  via `notifications/progress` (reuses M1-8).
+
+DoD: a long-running tool reports via tasks and can be cancelled mid-flight; conformance
+covers tasks; the task modules leave `cover_excl_mods`.
+
+#### M6b — `_meta`, icons, batch & the 0.6.0 finish line
+*Ledger: `milestones/M6b-meta-icons-batch-finish-ledger.md`. Depends on M6a.*
+
+- **`_meta` channel end-to-end:** request `_meta` carried through `erlmcp_ctx` to the
+  handler and usable on the response (beyond the discoverability `_meta` of M2a).
+- **Icons:** `Tool.icons` settable on the `add_tool` map + surfaced in `tools/list`.
+- **Graceful batch tolerance:** session-level JSON-RPC batch *execution* (closes the
+  M1-2 deferral — M1-2 landed batch parse/classify; M6b dispatches batches via the
+  worker model and aggregates responses, degrading gracefully on malformed members).
+- **Coverage endpoint:** `cover_excl_mods` is empty (the last two modules left in M6a);
+  the gate holds over the whole codebase with stdio's io-loop the sole named exception.
+
+Closes: A (tasks, `_meta`, batch). DoD: `_meta`/icons/batch land; conformance updated;
+`cover_excl_mods` empty; full pipeline green — 0.6.0 release-ready.
 
 ### M7 — Stretch / post-0.6
 - OAuth 2.1 client subsystem (rmcp has it; large and self-contained — sequence after
