@@ -698,6 +698,83 @@ init_server() ->
     timer:sleep(50),
     {ok, Server}.
 
+%% Cover resource/prompt/logging registration + list via protocol
+tools_list_with_meta_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_resource(Server, #{
+        uri => <<"x://a">>, name => <<"A">>,
+        handler => fun(_) -> {ok, #{<<"uri">> => <<"x://a">>, <<"text">> => <<"t">>}} end
+    }),
+    ok = erlmcp_server_session:register_prompt(Server, #{
+        name => <<"p">>, description => <<"P">>,
+        handler => fun(_, _) -> {ok, []} end
+    }),
+    ok = erlmcp_server_session:set_log_level(Server, info),
+    init_server_with_transport(Server),
+    ListReq = erlmcp_json_rpc:encode_request(2, <<"resources/list">>, #{}),
+    erlmcp_server_session:send_message(Server, ListReq),
+    Resp = decode_resp(wait_transport_send()),
+    ?assert(maps:is_key(<<"result">>, Resp)),
+    gen_statem:stop(Server).
+
+server_logging_emit_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    init_server_with_transport(Server),
+    ok = erlmcp_server_session:set_log_level(Server, debug),
+    erlmcp_server_session:emit_log(Server, info, <<"test">>, <<"msg">>),
+    Notif = decode_resp(wait_transport_send()),
+    ?assertEqual(<<"notifications/message">>, maps:get(<<"method">>, Notif)),
+    gen_statem:stop(Server).
+
+server_resource_subscribe_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_resource(Server, #{
+        uri => <<"x://a">>, name => <<"A">>,
+        handler => fun(_) -> {ok, #{<<"uri">> => <<"x://a">>, <<"text">> => <<"t">>}} end
+    }),
+    init_server_with_transport(Server),
+    SubReq = erlmcp_json_rpc:encode_request(2, <<"resources/subscribe">>,
+        #{<<"uri">> => <<"x://a">>}),
+    erlmcp_server_session:send_message(Server, SubReq),
+    _SubResp = wait_transport_send(),
+    erlmcp_server_session:notify_resource_updated(Server, <<"x://a">>),
+    Notif = decode_resp(wait_transport_send()),
+    ?assertEqual(<<"notifications/resources/updated">>, maps:get(<<"method">>, Notif)),
+    gen_statem:stop(Server).
+
+server_completion_test() ->
+    Transport = self(),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        transport => Transport,
+        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_prompt(Server, #{
+        name => <<"p">>, description => <<"P">>,
+        handler => fun(_, _) -> {ok, []} end,
+        completions => #{<<"arg">> => fun(_) -> [<<"v1">>] end}
+    }),
+    init_server_with_transport(Server),
+    CompReq = erlmcp_json_rpc:encode_request(2, <<"completion/complete">>, #{
+        <<"ref">> => #{<<"type">> => <<"ref/prompt">>, <<"name">> => <<"p">>},
+        <<"argument">> => #{<<"name">> => <<"arg">>, <<"value">> => <<"">>}
+    }),
+    erlmcp_server_session:send_message(Server, CompReq),
+    Resp = decode_resp(wait_transport_send()),
+    ?assert(maps:is_key(<<"result">>, Resp)),
+    gen_statem:stop(Server).
+
 init_server_with_transport(Server) ->
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,

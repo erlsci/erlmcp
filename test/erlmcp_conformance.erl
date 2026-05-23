@@ -1,6 +1,7 @@
 -module(erlmcp_conformance).
 
--export([run_server_scorecard/0, run_client_scorecard/0, run_transport_scorecard/0]).
+-export([run_server_scorecard/0, run_client_scorecard/0, run_transport_scorecard/0,
+         publish_scorecard/0, publish_scorecard/1]).
 
 -define(SCENARIOS, [
     %% L0 — protocol basics
@@ -31,7 +32,11 @@
     {l4, <<"prompts/list_changed">>, fun scenario_prompts_list_changed/1},
     {l4, <<"worker_crash_isolation">>, fun scenario_worker_crash_isolation/1},
     {l4, <<"cancellation">>, fun scenario_cancellation/1},
-    {l4, <<"structured_output">>, fun scenario_structured_output/1}
+    {l4, <<"structured_output">>, fun scenario_structured_output/1},
+    %% L4 — discoverability (protocol-native surfaces)
+    {l4, <<"instructions_present">>, fun scenario_instructions/1},
+    {l4, <<"meta_wayfinding">>, fun scenario_meta_wayfinding/1},
+    {l4, <<"annotations_present">>, fun scenario_annotations/1}
 ]).
 
 -spec run_server_scorecard() -> {float(), [{atom(), binary(), pass | fail}]}.
@@ -71,6 +76,8 @@ setup_conformance_server() ->
         output_schema => erlmcp_schema:object([
             erlmcp_schema:field(<<"echo">>, erlmcp_schema:string(), [required])
         ]),
+        category => <<"utility">>,
+        when_to_use => <<"When you need to echo text back">>,
         annotations => #{readOnlyHint => true},
         handler => fun(#{<<"msg">> := Msg}, _Ctx) ->
             {ok, erlmcp:text(Msg), #{<<"echo">> => Msg}}
@@ -433,6 +440,85 @@ scenario_structured_output(Server) ->
         true -> pass;
         false -> fail
     end.
+
+scenario_instructions(Server) ->
+    {ok, S2} = erlmcp_server_session:start_link(#{
+        transport => self(), name => <<"t">>, version => <<"1.0">>,
+        capabilities => #{}
+    }),
+    ok = erlmcp_server_session:register_tool(S2, #{
+        name => <<"t">>, description => <<"t">>,
+        input_schema => erlmcp_schema:object([]),
+        category => <<"test">>, when_to_use => <<"testing">>,
+        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    }),
+    Resp = send_req(S2, 1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    gen_statem:stop(S2),
+    Result = maps:get(<<"result">>, Resp, #{}),
+    case maps:is_key(<<"instructions">>, Result) of
+        true -> pass;
+        false -> fail
+    end.
+
+scenario_meta_wayfinding(Server) ->
+    Resp = send_req(Server, 30, <<"tools/list">>, #{}),
+    Tools = maps:get(<<"tools">>, maps:get(<<"result">>, Resp, #{}), []),
+    HasMeta = lists:any(fun(T) -> maps:is_key(<<"_meta">>, T) end, Tools),
+    case HasMeta of true -> pass; false -> fail end.
+
+scenario_annotations(Server) ->
+    Resp = send_req(Server, 31, <<"tools/list">>, #{}),
+    Tools = maps:get(<<"tools">>, maps:get(<<"result">>, Resp, #{}), []),
+    HasAnn = lists:any(fun(T) -> maps:is_key(<<"annotations">>, T) end, Tools),
+    case HasAnn of true -> pass; false -> fail end.
+
+%%====================================================================
+%% Publish scorecard artifact (M5a-1)
+%%====================================================================
+
+-spec publish_scorecard() -> ok.
+publish_scorecard() ->
+    publish_scorecard("conformance/results").
+
+-spec publish_scorecard(string()) -> ok.
+publish_scorecard(Dir) ->
+    {ServerScore, ServerResults} = run_server_scorecard(),
+    {ClientScore, ClientResults} = run_client_scorecard(),
+    {TransportScore, TransportResults} = run_transport_scorecard(),
+    {{Y,M,D},{H,Mi,S}} = calendar:universal_time(),
+    Date = io_lib:format("~4..0B-~2..0B-~2..0B", [Y,M,D]),
+    Time = io_lib:format("~2..0B:~2..0B:~2..0B", [H,Mi,S]),
+    Version = "0.6.0",
+    Filename = lists:flatten(io_lib:format("~s/erlmcp-~s-~s.txt",
+        [Dir, Version, Date])),
+    Lines = [
+        io_lib:format("# erlmcp Conformance Scorecard~n", []),
+        io_lib:format("Version: ~s~n", [Version]),
+        io_lib:format("Date: ~sT~sZ~n", [Date, Time]),
+        io_lib:format("Protocol: MCP 2025-11-25~n", []),
+        io_lib:format("Reference: rmcp server 87.5%, client 87.5%~n~n", []),
+        io_lib:format("## Server (~.1f%)~n", [ServerScore]),
+        format_results(ServerResults),
+        io_lib:format("~n## Client (~.1f%)~n", [ClientScore]),
+        format_results(ClientResults),
+        io_lib:format("~n## Transport (~.1f%)~n", [TransportScore]),
+        format_results(TransportResults),
+        io_lib:format("~n## Summary~n", []),
+        io_lib:format("Server:    ~.1f% (ref: 87.5%)~n", [ServerScore]),
+        io_lib:format("Client:    ~.1f% (ref: 87.5%)~n", [ClientScore]),
+        io_lib:format("Transport: ~.1f%~n", [TransportScore])
+    ],
+    ok = filelib:ensure_dir(Filename),
+    ok = file:write_file(Filename, Lines),
+    ok.
+
+format_results(Results) ->
+    [io_lib:format("  ~p ~s: ~s~n", [Level, Name,
+        case Status of pass -> "PASS"; fail -> "FAIL" end])
+     || {Level, Name, Status} <- Results].
 
 %%====================================================================
 %% Client scorecard (M3b)
