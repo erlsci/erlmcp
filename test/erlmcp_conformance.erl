@@ -441,7 +441,7 @@ scenario_structured_output(Server) ->
         false -> fail
     end.
 
-scenario_instructions(Server) ->
+scenario_instructions(_Server) ->
     {ok, S2} = erlmcp_server_session:start_link(#{
         transport => self(), name => <<"t">>, version => <<"1.0">>,
         capabilities => #{}

@@ -18,7 +18,7 @@ decode(Bin) when is_binary(Bin) ->
     try
         {ok, jsx:decode(Bin, [return_maps])}
     catch
-        error:badarg -> {error, {decode_error, badarg}}
+        _:_ -> {error, {decode_error, badarg}}
     end;
 decode(_) ->
     {error, {decode_error, not_binary}}.
