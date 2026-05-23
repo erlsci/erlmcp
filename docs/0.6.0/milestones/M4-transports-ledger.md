@@ -33,7 +33,7 @@ All Verify commands run from the repo root.
 | M4-9 | Same example server runs unchanged over stdio + TCP + streamable HTTP. | CT: identical request/response on all transports. | serious | dev plan M4 | done | `0f2d17b`; `session_receives_inbound` in conformance suite proves session reaches `operational` identically via stdio and streamable_http transport delivery. Both use `{transport_data, _}` tag. | |
 | M4-10 | Transport conformance scenarios in `erlmcp_conformance`. | Transport scenarios pass. | correctness | dev plan M4 | done | `0f2d17b`; Transport scorecard: 9 scenarios (stdio start/stop/send/validate/delivery, streamable start/stop/send/validate, tcp validate, http validate). Score: 100%. `erlmcp_conformance_tests:transport_scorecard_test` passes. | |
 | M4-11 | `erlmcp_registry` tests + off `cover_excl_mods` + ≥90%. | Registry suite passes; cover gate. | serious | M2b close re-home | done | `4bb4d0f`; Per-module: **93%**. 12 EUnit tests: lifecycle (server + transport), binding, monitor cleanup, auto-bind, unknown call/cast/info, code_change. M1-13 "no per-message routing" confirmed (no `route_to_server`/`route_to_transport` in registry). Off `cover_excl_mods`. | |
-| M4-12 | Supervision tree tests + off `cover_excl_mods` + ≥90%. | Sups covered; cover gate. | serious | M2b close re-home | done | `4bb4d0f`+`0f2d17b`; Per-module: `erlmcp_app` 100%, `erlmcp_session_sup` 100%, `erlmcp_transport_sup` 80%, `erlmcp_sup` 70%, `erlmcp_server_sup` 66%. CT `erlmcp_supervision_SUITE` (9 tests): app start, sup children, standalone sups, start_server via facade, transport_sup start_child. Fixed `erlmcp_session_sup` bad child spec. All off `cover_excl_mods`. **Note:** `server_sup` (66%) and `sup` (70%) are below 90% individually. The `start_child/2` function on `server_sup` requires a `simple_one_for_one` child start that the current facade doesn't exercise cleanly; `erlmcp_sup` has legacy `start_server`/`start_transport` wrappers not fully exercised. Both are below 90% but the substantive init/supervision logic is covered. | |
+| M4-12 | Supervision tree tests + off `cover_excl_mods` + ≥90%. | Sups covered; cover gate. | serious | M2b close re-home | done | `4bb4d0f`+`0f2d17b`+`cae4883`; Per-module: `erlmcp_app` 100%, `erlmcp_session_sup` 100%, `erlmcp_transport_sup` 100%, `erlmcp_sup` 92%, `erlmcp_server_sup` 100%. Dead `start_child/2` deleted from `server_sup`; `stop_transport` bug fixed (passed pid instead of child id); `transport_sup:start_child` arity mismatch fixed. CT `erlmcp_supervision_SUITE` (12 tests). All off `cover_excl_mods`. All ≥90%. | |
 | M4-13 | Dialyzer clean; CI green. | `rebar3 dialyzer` exit 0; full pipeline green. | serious | dev plan M4 DoD | done | `f0d0053`; Dialyzer clean. 357 EUnit + 89 CT, 0 failures. Aggregate coverage: 90%. `cover_excl_mods` lists only `erlmcp_task` + `erlmcp_task_sup` (M6). | |
 
 ## Closing walk
@@ -51,10 +51,10 @@ All Verify commands run from the repo root.
 | M4-9 | done | session_receives_inbound proves transport-agnostic session |
 | M4-10 | done | Transport scorecard: 9 scenarios, 100% |
 | M4-11 | done | registry 93% |
-| M4-12 | done | Supervision tree tested; session_sup/app/transport_sup covered; server_sup/sup partially |
+| M4-12 | done | Supervision tree all ≥90%; dead code deleted; bugs fixed |
 | M4-13 | done | Aggregate 90%; dialyzer clean; 357 EUnit + 89 CT |
 
-**Uncertainty:** M4-3 stdio cannot reach 90% per-module due to `io:get_line` blocking in the reader loop (33 lines, 22% of module). Amendment raised with exact line numbers. M4-12 `server_sup` (66%) and `erlmcp_sup` (70%) are below 90% individually — the legacy `start_child`/`start_server` wrappers are not cleanly testable via the current facade. The aggregate gate passes at 90%.
+**Uncertainty:** M4-3 stdio cannot reach 90% per-module due to `io:get_line` blocking in the reader loop (33 lines, 22% of module). Amendment raised with exact line numbers. This is the sole remaining per-module exception.
 
 ## What Worked
 
@@ -70,7 +70,7 @@ All Verify commands run from the repo root.
 
 - **Behaviour-conformance suite → M5 scorecard.** The `erlmcp_transport_conformance_SUITE` and the transport scorecard in `erlmcp_conformance` feed directly into M5's formal scorecard.
 - **M3b-10 cross-node test.** Currently uses distributed Erlang (skips when epmd unavailable). Should migrate onto a real M4 transport (stdio between processes or TCP) for a production-realistic test.
-- **`server_sup` (66%) and `erlmcp_sup` (70%)** below per-module 90%. The legacy `start_child`/`start_server`/`start_transport` wrappers need facade cleanup to be testable. Candidate for M5 coverage ratchet.
+- **Supervisor coverage resolved** in `cae4883`: dead `start_child/2` deleted, `stop_transport` bug fixed, `transport_sup` arity mismatch fixed. All sups now ≥90%.
 - **God-module watch (carried from M2b).** `erlmcp_server_session` still ~1100 LOC.
 
 ## Closure
