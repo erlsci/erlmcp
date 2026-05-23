@@ -75,5 +75,16 @@ All Verify commands run from the repo root.
 
 ## Closure
 
-Closed at commit `f0d0053` on 2026-05-23. CDC verification: _(pending CDC sign-off)_.
-Total rows: 13. Done: 13 (1 with amendment). Deferred: 0. No-op: 0.
+Closed at commit `f0d0053` on 2026-05-23 (supervisor cleanup `cae4883`, amendment
+rewrite `8af3684`). CDC verification: **signed off 2026-05-23 (Claude/CDC session).**
+Verified: transport↔session contract unified to one `{transport_data, _}` tag across
+all four transports (`grep transport_message src` → 0); the supervisor cleanup is
+sound — dead `erlmcp_server_sup:start_child/2` deleted (zero callers, would crash a
+`simple_one_for_one` sup), and two real bugs it was masking are fixed
+(`erlmcp_sup:stop_transport` now terminates by child id not pid;
+`erlmcp_transport_sup:start_child` now uses the correct `start_link/1` arity); sups
+now 100%/92%/100%; registry off the message hot path (M4-11). **M4-12 is a clean
+`done` (no amendment).** The sole accepted exception is M4-3: `erlmcp_transport_stdio`
+71%, whose 33 uncovered lines are the `io:get_line` reader loop — a genuine structural
+ceiling, named line-by-line. CT-gated rows rest on CI green on the branch.
+Total rows: 13. Done: 13 (1 named-line amendment, M4-3). Deferred: 0. No-op: 0.

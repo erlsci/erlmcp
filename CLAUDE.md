@@ -33,7 +33,15 @@ built on the Inaka/OTP rubric captured in `docs/0.6.0/planning/phase0-erlang-rub
   use edoc/ex_doc).
 - **Coverage gate:** 90%, **scoped** to implemented modules via `cover_excl_mods`;
   the exclusion list shrinks each milestone until it covers everything at 90%→95%
-  by M5.
+  by M5. **Per-module, not just aggregate:** a newly-included module must itself
+  reach the floor — a high-coverage module may not be used to carry a weak one over
+  an aggregate line. **"Unreachable" requires line-level proof** that the code
+  cannot be driven from any test; *"we didn't write the test yet"* and *"this
+  function is dead"* are **not** unreachability — the former is **covered** (write
+  the test), the latter is **deleted** (it's dead, and dead code often hides bugs —
+  removing it has twice surfaced real defects in this repo). A genuine ceiling
+  (e.g. an `io:get_line` blocking loop) is closed by a **raised amendment that names
+  the exact uncovered lines**, not a blanket sub-90 `done`.
 - **Error handling:** validate at the edge, crash in the interior; translate crashes
   to JSON-RPC errors at the session↔worker boundary (Phase 2 §5).
 - **No shared records** across module boundaries or in exported specs; opaque types

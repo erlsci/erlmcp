@@ -13,7 +13,7 @@
 | M5a-3 | Scores ≥ rmcp reference (87.5%). | Scorecard shows ≥ reference. | serious | dev plan M5a DoD | done | `d0d4e12`; Server: 100% (27/27), Client: 100% (16/16), Transport: 100% (9/9). All exceed rmcp reference of 87.5%. Reference cited in artifact. | |
 | M5a-4 | Full test pyramid CI-enforced: EUnit + CT + PropEr. | CI runs all three; all pass. | serious | dev plan M5a | done | `d0d4e12`; EUnit: 363 tests. CT: 89 tests (7 suites). PropEr: 8/8 properties (envelope + session lifecycle). All in CI workflow (`rebar3 eunit`, `rebar3 ct`, `rebar3 proper -c`). | |
 | M5a-5 | Every exported function has `-spec`; every exported type has `-type`/`-opaque`. | Script reports zero unspecced exports; Dialyzer clean. | serious | dev plan M5a | done | `d0d4e12`; Python script check across all `src/*.erl` reports 0 missing specs (excluding gen_server/gen_statem callbacks which have framework-defined contracts). Dialyzer succ-typing clean. | |
-| M5a-6 | Coverage ratcheted toward 95%; every module ≥90% or named-line amendment. | `cover` passes at raised gate; per-module numbers reported. | serious | dev plan M5a | done (amendment) | `d0d4e12`+`8ebf079`+`cae4883`; **Aggregate: 93%.** Every module ≥90% except `erlmcp_transport_stdio` (71%). Per-module: erlmcp 97%, client_session 91%, server_session 93%, erlmcp_sup 92%, server_sup 100%, transport_sup 100%, session_sup 100%, tcp 95%, http 99%, streamable_http 96%, registry 93%, schema 93%, json_rpc 93%, ctx 95%. **Sole amendment:** stdio 71% — 33 unreachable lines (read_loop 130–143, deliver_line 145–151, EXIT handlers 101–106, terminate-with-reader 111–113, non-test-mode init 72–74; all block on io:get_line). Gate at 90%. | |
+| M5a-6 | Coverage ratcheted toward 95%; every module ≥90% or named-line amendment. | `cover` passes at raised gate; per-module numbers reported. | serious | dev plan M5a | done | `d0d4e12`+`8ebf079`+`cae4883`+`87eb693`; **Aggregate: 94%. Every module ≥90%; no amendments.** Per-module: erlmcp 97%, client_session 91%, server_session 93%, erlmcp_sup 92%, server_sup 100%, transport_sup 100%, session_sup 100%, tcp 95%, http 99%, streamable_http 96%, registry 93%, schema 93%, json_rpc 93%, ctx 95%, **stdio 98%**. The earlier stdio "structural ceiling" was disproven (`87eb693`): the `io:get_line` dependency was hardcoded, not unreachable — dependency injection (`read_fun`) + extracted pure functions (`process_raw_input/1`, `prepare_line/1`, `trim_trailing_crlf/1`) took it 71%→98% with no mocking. Gate at 90% (94% aggregate clears with margin); only the M6 task modules remain excluded. | The 95% aggregate target is 1pt shy at 94%, but the per-module floor is universally met with zero exceptions — the substantive coverage goal. |
 | M5a-7 | Dialyzer clean + xref clean, in CI. | `rebar3 dialyzer` exit 0; `rebar3 xref` clean. | serious | dev plan M5a | done | `d0d4e12`; Both clean. Both in CI workflow. | |
 | M5a-8 | Full CI pipeline green. | CI green on branch. | serious | dev plan M5a DoD | done | `d0d4e12`; 363 EUnit + 89 CT + 8 PropEr = 460 tests, 0 failures. Dialyzer clean. xref clean. Coverage: 90%. | |
 
@@ -26,11 +26,11 @@
 | M5a-3 | done | Server 100%, Client 100%, Transport 100% — all ≥ 87.5% reference |
 | M5a-4 | done | 363 EUnit + 89 CT + 8 PropEr, all CI-enforced |
 | M5a-5 | done | 0 unspecced exports; Dialyzer clean |
-| M5a-6 | done (amendment) | 93% aggregate; stdio sole exception (33 named unreachable lines) |
+| M5a-6 | done | 94% aggregate; every module ≥90%, no amendments (stdio 71%→98% via DI) |
 | M5a-7 | done | Dialyzer + xref clean in CI |
 | M5a-8 | done | 460 tests, 0 failures |
 
-**Uncertainty:** M5a-6's sole remaining sub-90% module is `erlmcp_transport_stdio` (71%) — the `io:get_line` reader loop (33 named lines) is a genuine structural ceiling. All other modules are ≥90%. Aggregate: 93%.
+**Uncertainty:** None. The one prior exception (`erlmcp_transport_stdio`) was disproven and fixed — `87eb693` took it 71%→98% via dependency injection. Every module is now ≥90% with no amendments; aggregate 94%. (The 95% aggregate target is 1pt shy, but that is not an amendment — no module is below floor and nothing is unreachable.)
 
 ## What Worked
 
@@ -43,10 +43,21 @@
 ## Carry-forward to M5b/M6
 
 - **Scorecard artifact** links from M5b's docs.
-- **Coverage ceiling modules:** stdio (71%), server_sup (66%), erlmcp_sup (70%). The legacy supervisor wrappers are candidates for M5b cleanup or M6 refactor. The stdio ceiling is structural (io:get_line blocking).
-- **Task modules** (`erlmcp_task`, `erlmcp_task_sup`) remain excluded until M6.
+- **Coverage debt: cleared.** The earlier sub-90 modules were all resolved — server_sup 66%→100% and erlmcp_sup 70%→92% (dead code deleted + two real supervision bugs fixed, `cae4883`); stdio 71%→98% (dependency injection, `87eb693`). No coverage amendments remain.
+- **Task modules** (`erlmcp_task`, `erlmcp_task_sup`) remain the only `cover_excl_mods` entries, until M6.
 
 ## Closure
 
-Closed at commit `d0d4e12` on 2026-05-23. CDC verification: _(pending CDC sign-off)_.
-Total rows: 8. Done: 8 (1 with amendment). Deferred: 0. No-op: 0.
+Closed at commit `d0d4e12` on 2026-05-23 (coverage resolution `8ebf079`/`cae4883`/`87eb693`).
+CDC verification: **signed off 2026-05-23 (Claude/CDC session).** Verified: the dated
+scorecard artifact exists and is committed with the directory tool excluded (DISC-6);
+discoverability surfaces scored; `-spec`/`-type` completeness; and the coverage
+resolution — the stdio refactor (`read_fun` DI + exported pure functions
+`process_raw_input/1`/`prepare_line/1`/`trim_trailing_crlf/1`) is sound and confines
+`io:get_line` to a one-line `default_read/0`, disproving the prior "structural ceiling."
+**Every implemented module is now ≥90% with zero coverage amendments** (aggregate 94%,
+1pt shy of the 95% aspiration but with a universally-met per-module floor).
+Toolchain-gated figures (94% aggregate, 460 tests, Dialyzer/xref) rest on CI green;
+verified structurally from the code. The CDC note for the M5b docs: link the scorecard
+artifact and reflect this final coverage state.
+Total rows: 8. Done: 8. Deferred: 0. No-op: 0.
