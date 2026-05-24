@@ -16,6 +16,8 @@
 -export([set_log_level/2]).
 %% Completion (M3a-7)
 -export([complete/3]).
+%% Tasks (M6a)
+-export([list_tasks/1, get_task/2, get_task_result/2, cancel_task/2]).
 %% Callback registration (M3b)
 -export([set_sampling_handler/2, set_roots_handler/2, set_elicitation_handler/2,
          notify_roots_changed/1]).
@@ -83,9 +85,17 @@ call_tool(Session, Name, Args) ->
 -spec call_tool(pid(), binary(), map(), map()) -> {ok, map()} | {error, term()}.
 call_tool(Session, Name, Args, Opts) ->
     Params = #{<<"name">> => Name, <<"arguments">> => Args},
-    Params1 = case maps:get(progress_token, Opts, undefined) of
-        undefined -> Params;
-        Token -> Params#{<<"_meta">> => #{<<"progressToken">> => Token}}
+    MetaBase = case maps:get(progress_token, Opts, undefined) of
+        undefined -> #{};
+        Token -> #{<<"progressToken">> => Token}
+    end,
+    Meta = case maps:get(task, Opts, false) of
+        true -> MetaBase#{<<"_task">> => true};
+        false -> MetaBase
+    end,
+    Params1 = case maps:size(Meta) of
+        0 -> Params;
+        _ -> Params#{<<"_meta">> => Meta}
     end,
     request(Session, <<"tools">>, <<"tools/call">>, Params1).
 
@@ -167,6 +177,30 @@ set_log_level(Session, Level) when is_atom(Level) ->
 complete(Session, Ref, Argument) ->
     request(Session, <<"completions">>, <<"completion/complete">>,
             #{<<"ref">> => Ref, <<"argument">> => Argument}).
+
+%%====================================================================
+%% API — tasks (M6a)
+%%====================================================================
+
+-spec list_tasks(pid()) -> {ok, map()} | {error, term()}.
+list_tasks(Session) ->
+    request(Session, <<"tasks">>, <<"tasks/list">>, #{}).
+
+-spec get_task(pid(), binary()) -> {ok, map()} | {error, term()}.
+get_task(Session, TaskId) ->
+    request(Session, <<"tasks">>, <<"tasks/get">>, #{<<"id">> => TaskId}).
+
+-spec get_task_result(pid(), binary()) -> {ok, term()} | {error, term()}.
+get_task_result(Session, TaskId) ->
+    request(Session, <<"tasks">>, <<"tasks/result">>, #{<<"id">> => TaskId}).
+
+-spec cancel_task(pid(), binary()) -> ok | {error, term()}.
+cancel_task(Session, TaskId) ->
+    case request(Session, <<"tasks">>, <<"tasks/cancel">>,
+                 #{<<"id">> => TaskId}) of
+        {ok, _} -> ok;
+        Error -> Error
+    end.
 
 %%====================================================================
 %% API — callback registration (M3b)
