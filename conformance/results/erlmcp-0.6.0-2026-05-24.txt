@@ -1,0 +1,70 @@
+# erlmcp Conformance Scorecard
+Version: 0.6.0
+Date: 2026-05-24T03:36:46Z
+Protocol: MCP 2025-11-25
+Reference: rmcp server 87.5%, client 87.5%
+
+## Server (100.0%)
+  l0 initialize: PASS
+  l0 ping: PASS
+  l0 version_negotiation: PASS
+  l0 pre_init_rejected: PASS
+  l1 tools/list: PASS
+  l1 tools/call: PASS
+  l1 tools/call_validation: PASS
+  l1 tools/annotations: PASS
+  l2 resources/list: PASS
+  l2 resources/read: PASS
+  l2 resources/templates: PASS
+  l2 resources/subscribe: PASS
+  l3 prompts/list: PASS
+  l3 prompts/get: PASS
+  l3 logging/setLevel: PASS
+  l3 logging/filter: PASS
+  l4 completion/complete: PASS
+  l4 capabilities_derived: PASS
+  l4 tools/list_changed: PASS
+  l4 resources/list_changed: PASS
+  l4 prompts/list_changed: PASS
+  l4 worker_crash_isolation: PASS
+  l4 cancellation: PASS
+  l4 structured_output: PASS
+  l4 instructions_present: PASS
+  l4 meta_wayfinding: PASS
+  l4 annotations_present: PASS
+  l4 batch_execution: PASS
+  l4 task_lifecycle: PASS
+
+## Client (100.0%)
+  l0 client_initialize: PASS
+  l0 client_ping: PASS
+  l1 client_list_tools: PASS
+  l1 client_call_tool: PASS
+  l2 client_list_resources: PASS
+  l2 client_read_resource: PASS
+  l3 client_list_prompts: PASS
+  l3 client_get_prompt: PASS
+  l3 client_set_log_level: PASS
+  l4 client_completion: PASS
+  l4 client_capability_gating: PASS
+  l4 client_sampling_callback: PASS
+  l4 client_roots_callback: PASS
+  l4 client_elicitation_callback: PASS
+  l4 client_capability_advertisement: PASS
+  l4 client_inbound_unknown_method: PASS
+
+## Transport (100.0%)
+  t0 stdio_start_stop: PASS
+  t0 stdio_send: PASS
+  t0 stdio_validate_config: PASS
+  t0 stdio_session_delivery: PASS
+  t0 streamable_start_stop: PASS
+  t0 streamable_send: PASS
+  t0 streamable_validate_config: PASS
+  t0 tcp_validate_config: PASS
+  t0 http_validate_config: PASS
+
+## Summary
+Server:    100.0% (ref: 87.5%)
+Client:    100.0% (ref: 87.5%)
+Transport: 100.0%

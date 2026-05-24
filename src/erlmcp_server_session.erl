@@ -268,13 +268,54 @@ handle_uninitialized_data(RawData, Data) ->
     end.
 
 handle_operational_data(RawData, Data) ->
-    case erlmcp_json_rpc:decode_and_classify(RawData) of
+    case erlmcp_json_rpc:decode_and_classify_any(RawData) of
+        {ok, {batch, Items}} ->
+            handle_batch(Items, Data);
         {ok, Classified} ->
             handle_operational_message(Classified, Data);
         {error, _Reason} ->
             send_error(Data, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
             keep_state_and_data
     end.
+
+handle_batch(Items, Data) ->
+    Responses = lists:filtermap(fun(Item) ->
+        case Item of
+            {notification, _, _} ->
+                false;
+            {parse_error, Reason} ->
+                Json = erlmcp_json_rpc:encode_error_response(
+                           null, erlmcp_json_rpc:invalid_request(),
+                           iolist_to_binary(io_lib:format("~p", [Reason]))),
+                {true, Json};
+            {request, Id, Method, Params} ->
+                Json = dispatch_batch_request(Id, Method, Params, Data),
+                {true, Json};
+            {response, _, _} ->
+                false;
+            {error_response, _, _} ->
+                false;
+            _ ->
+                false
+        end
+    end, Items),
+    case Responses of
+        [] -> keep_state_and_data;
+        _ ->
+            BatchJson = erlmcp_json_rpc:encode_batch(Responses),
+            send_raw(Data, BatchJson),
+            keep_state_and_data
+    end.
+
+dispatch_batch_request(Id, <<"ping">>, _Params, _Data) ->
+    erlmcp_json_rpc:encode_response(Id, #{});
+dispatch_batch_request(Id, <<"tools/list">>, _Params, Data) ->
+    ToolList = [format_tool_for_list(T) || T <- maps:values(Data#data.tools)],
+    erlmcp_json_rpc:encode_response(Id, #{<<"tools">> => ToolList});
+dispatch_batch_request(Id, Method, _Params, _Data) ->
+    erlmcp_json_rpc:encode_error_response(
+        Id, erlmcp_json_rpc:method_not_found(),
+        <<"Batch dispatch: ", Method/binary>>).
 
 %%====================================================================
 %% Message handling — uninitialized
@@ -470,12 +511,17 @@ dispatch_tool_call(Id, ToolName, Args, ToolSpec, Meta, Data) ->
     Session = self(),
     Transport = Data#data.transport,
     ProgressToken = maps:get(<<"progressToken">>, Meta, undefined),
+    RequestMeta = maps:without([<<"progressToken">>, <<"_task">>], Meta),
     CtxOpts = #{session => Session, transport => Transport, request_id => Id},
     CtxOpts1 = case ProgressToken of
         undefined -> CtxOpts;
         _ -> CtxOpts#{progress_token => ProgressToken}
     end,
-    Ctx = erlmcp_ctx:new(CtxOpts1),
+    CtxOpts2 = case maps:size(RequestMeta) of
+        0 -> CtxOpts1;
+        _ -> CtxOpts1#{meta => RequestMeta}
+    end,
+    Ctx = erlmcp_ctx:new(CtxOpts2),
     {Pid, Ref} = spawn_monitor(fun() ->
         RawResult = call_tool_handler(ToolName, Args, ToolSpec, Ctx),
         Formatted = format_tool_result(RawResult),
@@ -504,6 +550,14 @@ format_tool_result({ok, Content, Structured}) when is_list(Content), is_map(Stru
     {ok, #{<<"content">> => Content, <<"structuredContent">> => Structured}};
 format_tool_result({ok, SingleItem, Structured}) when is_map(SingleItem), is_map(Structured) ->
     {ok, #{<<"content">> => [SingleItem], <<"structuredContent">> => Structured}};
+format_tool_result({ok, Content, Structured, ResponseMeta})
+  when is_list(Content), is_map(Structured), is_map(ResponseMeta) ->
+    {ok, #{<<"content">> => Content, <<"structuredContent">> => Structured,
+           <<"_meta">> => ResponseMeta}};
+format_tool_result({ok, SingleItem, Structured, ResponseMeta})
+  when is_map(SingleItem), is_map(Structured), is_map(ResponseMeta) ->
+    {ok, #{<<"content">> => [SingleItem], <<"structuredContent">> => Structured,
+           <<"_meta">> => ResponseMeta}};
 format_tool_result({error, Code, Msg}) ->
     {error, Code, Msg}.
 
@@ -1197,10 +1251,14 @@ format_tool_for_list(Spec) ->
         undefined -> B3;
         TaskSupport -> B3#{<<"taskSupport">> => atom_to_binary(TaskSupport, utf8)}
     end,
+    B5 = case maps:get(icons, Spec, undefined) of
+        undefined -> B4;
+        Icons -> B4#{<<"icons">> => Icons}
+    end,
     Meta = build_meta(Spec),
     case maps:size(Meta) of
-        0 -> B4;
-        _ -> B4#{<<"_meta">> => Meta}
+        0 -> B5;
+        _ -> B5#{<<"_meta">> => Meta}
     end.
 
 format_annotations(Ann) when is_map(Ann) ->

@@ -36,7 +36,10 @@
     %% L4 — discoverability (protocol-native surfaces)
     {l4, <<"instructions_present">>, fun scenario_instructions/1},
     {l4, <<"meta_wayfinding">>, fun scenario_meta_wayfinding/1},
-    {l4, <<"annotations_present">>, fun scenario_annotations/1}
+    {l4, <<"annotations_present">>, fun scenario_annotations/1},
+    %% L4 — batch + tasks
+    {l4, <<"batch_execution">>, fun scenario_batch/1},
+    {l4, <<"task_lifecycle">>, fun scenario_task_lifecycle/1}
 ]).
 
 -spec run_server_scorecard() -> {float(), [{atom(), binary(), pass | fail}]}.
@@ -50,6 +53,8 @@ run_server_scorecard() ->
             {Level, Name, fail}
         end
     end, ?SCENARIOS),
+    catch application:stop(erlmcp),
+    timer:sleep(100),
     gen_statem:stop(Server),
     Passed = length([ok || {_, _, pass} <- Results]),
     Total = length(Results),
@@ -61,6 +66,7 @@ run_server_scorecard() ->
 %%====================================================================
 
 setup_conformance_server() ->
+    {ok, _} = application:ensure_all_started(erlmcp),
     {ok, Server} = erlmcp_server_session:start_link(#{
         transport => self(),
         name => <<"conformance-server">>,
@@ -439,6 +445,43 @@ scenario_structured_output(Server) ->
          andalso maps:is_key(<<"content">>, Result) of
         true -> pass;
         false -> fail
+    end.
+
+scenario_batch(Server) ->
+    Batch = jsx:encode([
+        #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 100, <<"method">> => <<"ping">>},
+        #{<<"jsonrpc">> => <<"2.0">>, <<"method">> => <<"notifications/initialized">>}
+    ]),
+    erlmcp_server_session:send_message(Server, Batch),
+    Resp = decode(wait_send()),
+    case is_list(Resp) andalso length(Resp) =:= 1 of
+        true -> pass;
+        false -> fail
+    end.
+
+scenario_task_lifecycle(Server) ->
+    ok = erlmcp_server_session:register_tool(Server, #{
+        name => <<"task_conf">>, description => <<"Task conf">>,
+        input_schema => erlmcp_schema:object([]),
+        task_support => optional,
+        handler => fun(_, _) -> timer:sleep(100), {ok, erlmcp:text(<<"done">>)} end
+    }),
+    _ = wait_send(),
+    CallResp = send_req(Server, 50, <<"tools/call">>, #{
+        <<"name">> => <<"task_conf">>,
+        <<"arguments">> => #{},
+        <<"_meta">> => #{<<"_task">> => true}
+    }),
+    case maps:get(<<"taskId">>, maps:get(<<"result">>, CallResp, #{}), undefined) of
+        undefined -> fail;
+        TaskId ->
+            timer:sleep(200),
+            ResultResp = send_req(Server, 51, <<"tasks/result">>,
+                                  #{<<"id">> => TaskId}),
+            case maps:is_key(<<"result">>, ResultResp) of
+                true -> pass;
+                false -> fail
+            end
     end.
 
 scenario_instructions(_Server) ->
