@@ -397,7 +397,7 @@ handle_initialize(Id, Params, Data) ->
     case erlmcp_capabilities:negotiate_version(
              ClientVersion, erlmcp_capabilities:supported_versions()) of
         {ok, Version} ->
-            Instructions = generate_instructions(Data),
+            Instructions = erlmcp_instructions:generate(maps:values(Data#data.tools)),
             ServerCaps = erlmcp_capabilities:build_server_capabilities(
                              derive_capabilities(Data)),
             Result = #{
@@ -459,9 +459,9 @@ handle_tools_list(Id, Params, Data) ->
         maps:get(name, A) =< maps:get(name, B)
     end, maps:values(Data#data.tools)),
     Cursor = maps:get(<<"cursor">>, Params, undefined),
-    {PageTools, NextCursor} = paginate(Sorted, Cursor),
+    {PageTools, NextCursor} = erlmcp_pagination:paginate(Sorted, Cursor),
     ToolList = [format_tool_for_list(T) || T <- PageTools],
-    Result = paginated_result(<<"tools">>, ToolList, NextCursor),
+    Result = erlmcp_pagination:paginated_result(<<"tools">>, ToolList, NextCursor),
     send_response(Data, Id, Result),
     keep_state_and_data.
 
@@ -592,9 +592,9 @@ handle_resources_list(Id, Params, Data) ->
         maps:get(uri, A) =< maps:get(uri, B)
     end, maps:values(Data#data.resources)),
     Cursor = maps:get(<<"cursor">>, Params, undefined),
-    {Page, NextCursor} = paginate(Sorted, Cursor),
+    {Page, NextCursor} = erlmcp_pagination:paginate(Sorted, Cursor),
     ResList = [format_resource_for_list(R) || R <- Page],
-    Result = paginated_result(<<"resources">>, ResList, NextCursor),
+    Result = erlmcp_pagination:paginated_result(<<"resources">>, ResList, NextCursor),
     send_response(Data, Id, Result),
     keep_state_and_data.
 
@@ -606,7 +606,7 @@ handle_resources_read(Id, Params, Data) ->
         Uri ->
             case maps:get(Uri, Data#data.resources, undefined) of
                 undefined ->
-                    case find_matching_template(Uri, Data#data.resource_templates) of
+                    case erlmcp_uri_template:find_matching(Uri, Data#data.resource_templates) of
                         {ok, TplSpec, TplParams} ->
                             dispatch_resource_read(Id, Uri, TplSpec, TplParams, Data);
                         error ->
@@ -651,9 +651,9 @@ handle_resource_templates_list(Id, Params, Data) ->
         maps:get(uri_template, A) =< maps:get(uri_template, B)
     end, maps:values(Data#data.resource_templates)),
     Cursor = maps:get(<<"cursor">>, Params, undefined),
-    {Page, NextCursor} = paginate(Sorted, Cursor),
+    {Page, NextCursor} = erlmcp_pagination:paginate(Sorted, Cursor),
     TplList = [format_resource_template_for_list(T) || T <- Page],
-    Result = paginated_result(<<"resourceTemplates">>, TplList, NextCursor),
+    Result = erlmcp_pagination:paginated_result(<<"resourceTemplates">>, TplList, NextCursor),
     send_response(Data, Id, Result),
     keep_state_and_data.
 
@@ -693,41 +693,6 @@ format_resource_template_for_list(Spec) ->
     maybe_add_field(<<"mimeType">>, mime_type, Spec, B1).
 
 %%====================================================================
-%% Resources — URI template matching
-%%====================================================================
-
-find_matching_template(Uri, Templates) ->
-    maps:fold(fun(UriTemplate, Spec, error) ->
-        case match_template(UriTemplate, Uri) of
-            {ok, Params} -> {ok, Spec, Params};
-            error -> error
-        end;
-    (_UriTemplate, _Spec, Found) -> Found
-    end, error, Templates).
-
-match_template(Template, Uri) ->
-    TParts = binary:split(Template, <<"/">>, [global]),
-    UParts = binary:split(Uri, <<"/">>, [global]),
-    case length(TParts) =:= length(UParts) of
-        false -> error;
-        true -> match_parts(TParts, UParts, #{})
-    end.
-
-match_parts([], [], Acc) -> {ok, Acc};
-match_parts([TPart | TRest], [UPart | URest], Acc) ->
-    case TPart of
-        <<"{", Rest/binary>> ->
-            case binary:split(Rest, <<"}">>) of
-                [ParamName, <<>>] ->
-                    match_parts(TRest, URest, Acc#{ParamName => UPart});
-                _ -> error
-            end;
-        UPart ->
-            match_parts(TRest, URest, Acc);
-        _ -> error
-    end.
-
-%%====================================================================
 %% Prompts — list & get (M2b)
 %%====================================================================
 
@@ -736,9 +701,9 @@ handle_prompts_list(Id, Params, Data) ->
         maps:get(name, A) =< maps:get(name, B)
     end, maps:values(Data#data.prompts)),
     Cursor = maps:get(<<"cursor">>, Params, undefined),
-    {Page, NextCursor} = paginate(Sorted, Cursor),
+    {Page, NextCursor} = erlmcp_pagination:paginate(Sorted, Cursor),
     PromptList = [format_prompt_for_list(P) || P <- Page],
-    Result = paginated_result(<<"prompts">>, PromptList, NextCursor),
+    Result = erlmcp_pagination:paginated_result(<<"prompts">>, PromptList, NextCursor),
     send_response(Data, Id, Result),
     keep_state_and_data.
 
@@ -1076,47 +1041,6 @@ derive_capabilities(Data) ->
         false -> B4
     end.
 
-generate_instructions(Data) ->
-    Tools = [T || T <- maps:values(Data#data.tools),
-                  maps:get(is_directory, T, false) =/= true],
-    case Tools of
-        [] ->
-            <<"This server has no tools registered. Use tools/list to check for updates.">>;
-        _ ->
-            Categories = lists:usort(
-                [maps:get(category, T) || T <- Tools, maps:is_key(category, T)]),
-            Explicit = [maps:get(name, T) || T <- Tools,
-                            maps:get(entry_point, T, false) =:= true],
-            EntryPoints = case Explicit of
-                [] ->
-                    AllNextTargets = lists:usort(lists:flatten(
-                        [maps:get(next, T, []) || T <- Tools])),
-                    AllNames = [maps:get(name, T) || T <- Tools],
-                    lists:sort([N || N <- AllNames,
-                                     not lists:member(N, AllNextTargets)]);
-                _ ->
-                    lists:sort(Explicit)
-            end,
-            build_instructions_text(Categories, EntryPoints)
-    end.
-
-build_instructions_text(Categories, EntryPoints) ->
-    CatPart = case Categories of
-        [] -> <<>>;
-        _ -> <<" Categories: ", (join_bins(Categories, <<", ">>))/binary, ".">>
-    end,
-    EPPart = case EntryPoints of
-        [] -> <<>>;
-        _ -> <<" Start with: ", (join_bins(EntryPoints, <<", ">>))/binary, ".">>
-    end,
-    <<"This server provides tools organized by category.",
-      CatPart/binary, EPPart/binary,
-      " Use tools/list for the full catalog.">>.
-
-join_bins([H], _) -> H;
-join_bins([H | T], Sep) ->
-    lists:foldl(fun(B, Acc) -> <<Acc/binary, Sep/binary, B/binary>> end, H, T).
-
 %%====================================================================
 %% Peer requests (server→client, M3b)
 %%====================================================================
@@ -1299,40 +1223,6 @@ maybe_add_field(JsonKey, AtomKey, Spec, Map) ->
         undefined -> Map;
         Value -> Map#{JsonKey => Value}
     end.
-
-%%====================================================================
-%% Pagination (shared: tools, resources, templates, prompts)
-%%====================================================================
-
-paginate(Items, undefined) ->
-    paginate_from(Items, 0, 50);
-paginate(Items, Cursor) ->
-    Offset = binary_to_integer(base64:decode(Cursor)),
-    paginate_from(Items, Offset, 50).
-
-paginate_from(Items, Offset, PageSize) ->
-    Remaining = safe_nthtail(Offset, Items),
-    case safe_split(PageSize, Remaining) of
-        {Page, [_ | _]} ->
-            NextCursor = base64:encode(integer_to_binary(Offset + PageSize)),
-            {Page, NextCursor};
-        {Page, []} ->
-            {Page, undefined}
-    end.
-
-safe_nthtail(0, L) -> L;
-safe_nthtail(_, []) -> [];
-safe_nthtail(N, [_ | T]) -> safe_nthtail(N - 1, T).
-
-safe_split(N, L) -> safe_split(N, L, []).
-safe_split(0, L, Acc) -> {lists:reverse(Acc), L};
-safe_split(_, [], Acc) -> {lists:reverse(Acc), []};
-safe_split(N, [H | T], Acc) -> safe_split(N - 1, T, [H | Acc]).
-
-paginated_result(Key, Items, undefined) ->
-    #{Key => Items};
-paginated_result(Key, Items, NextCursor) ->
-    #{Key => Items, <<"nextCursor">> => NextCursor}.
 
 %%====================================================================
 %% Internal helpers
