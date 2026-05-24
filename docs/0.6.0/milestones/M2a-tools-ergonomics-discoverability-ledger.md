@@ -172,5 +172,17 @@ not a structural one — `add_tool/2` does not reject tools missing `category` o
 
 ## Closure
 
-Closed at commit `eae8a1f` on 2026-05-22. CDC verification: _(pending CDC sign-off)_.
+Closed at commit `eae8a1f` on 2026-05-22. CDC verification: **signed off 2026-05-23
+(Claude/CDC session).** Verified at `c0e697a` (production) + `eae8a1f` (CI/tests): static
+Verify reproduced; the discoverability derivation code read directly — all surfaces
+(`instructions`, per-tool `_meta`, capabilities, directory) project from the single
+`Data#data.tools` map (DISC-4, no parallel store), `_meta` namespaced under one
+`io.erlmcp/` prefix (DISC-5), behavioral hints in `annotations` not `_meta` (DISC-7),
+`instructions` frozen at `initialize` and non-enumerating (DISC-8); DISC tests are real
+(BFS reachability, regex key-grammar, directory-count equality); `jesse` validates
+before the worker spawns (`-32602`, handler never runs). No production change after the
+verified commit. Recorded design note (see *What Worked* #2): DISC metadata is a
+*verified* invariant, not structural — `add_tool/2` accepts a tool lacking
+`category`/`when_to_use`; spec-compliant, flagged for a possible future strict mode.
+Toolchain-gated rows rest on CI green.
 Total rows: 25. Done: 25. Deferred: 0. No-op: 0.

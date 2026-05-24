@@ -23,8 +23,8 @@ design.
 - Full MCP 2025-11-25 protocol surface (tools, resources, prompts, logging,
   completion, sampling, roots, elicitation)
 - Conformance scorecard: server 100%, client 100%, transport 100%
-- Test coverage: 94% aggregate, every module ≥90%
-- 396 EUnit + 92 CT + 8 PropEr tests
+- Test coverage: 93% aggregate, every module ≥90%
+- 527 tests (409 EUnit + 110 CT + 8 PropEr)
 
 ## Install
 
@@ -92,6 +92,6 @@ Apache 2.0
 [logo-large]: priv/images/logo-large.png
 [gh-actions-badge]: https://github.com/erlsci/erlmcp/workflows/ci/badge.svg
 [gh-actions]: https://github.com/erlsci/erlmcp/actions?query=workflow%3Aci
-[coverage-badge]: https://img.shields.io/badge/coverage-94%25-brightgreen
+[coverage-badge]: https://img.shields.io/badge/coverage-93%25-brightgreen
 [tag-badge]: https://img.shields.io/github/tag/erlsci/erlmcp.svg
 [tag]: https://github.com/erlsci/erlmcp/tags

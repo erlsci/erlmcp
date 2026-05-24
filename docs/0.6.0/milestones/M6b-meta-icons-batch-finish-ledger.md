@@ -60,5 +60,15 @@ readiness. This is the **0.6.0 finish line**.
 
 ## Closure
 
-Closed at commit `1fbd1c0` on 2026-05-24. CDC verification: _(pending CDC sign-off)_.
+Closed at commit `1fbd1c0` on 2026-05-24. CDC verification: **signed off 2026-05-24
+(Claude/CDC session).** Verified: `_meta` flows request→ctx→handler→response;
+`icons` ride the single `add_tool` map into `tools/list`; **session-level batch
+execution** is real (`handle_batch/2` dispatches each member + `encode_batch`,
+reusing M1-2's `decode_and_classify_any` — closes the M1-2 deferral); and the
+**`batch_execution` + `task_lifecycle` scenarios are now named L4 entries in
+`erlmcp_conformance`** (closes M6a-11's re-entry — the deferred task scenarios
+genuinely landed in the harness, not just the CT suite). `cover_excl_mods` is `[]`.
+Toolchain figures (93% aggregate, 527 tests, scorecard 100% across server/client/
+transport, Dialyzer/xref) rest on CI green; verified structurally from the code.
+**This is the 0.6.0 finish line — the feature surface is complete and verified.**
 Total rows: 6. Done: 6. Deferred: 0. No-op: 0.

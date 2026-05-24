@@ -142,5 +142,14 @@ scenarios; M5 formalizes and publishes the scorecard. The harness structure
 
 ## Closure
 
-Closed at commit `adb0978` on 2026-05-22. CDC verification: _(pending CDC sign-off)_.
+Closed at commit `adb0978` on 2026-05-22. CDC verification: **signed off 2026-05-23
+(Claude/CDC session).** Verified at `3dee476` (M2b surface) + `adb0978` (completions
+fix): the reuse claims hold — one `paginate/2`+`paginated_result/3` shared across all
+four list endpoints, one `derive_capabilities/1`, one `maybe_notify/2`; no forks ("one
+way to do a thing"). The conformance harness is real (24 L0–L4 scenarios, score computed
+as `Passed/Total`). CDC caught the M2b-10 `completions` capability gap (advertised
+nowhere despite `completion/complete` being implemented, with a matching blind spot in
+`scenario_capabilities_derived`); both were fixed in `adb0978` (capability added,
+scenario asserts it) and re-verified. M2b-2 scope recorded as level-1 URI templates
+(not full RFC 6570) per the evidence. Toolchain-gated rows rest on CI green.
 Total rows: 14. Done: 14. Deferred: 0. No-op: 0.
