@@ -65,5 +65,16 @@ consumer API** (scope increase, owner decision 2026-05-23).
 
 ## Closure
 
-Closed at commit `083976a` on 2026-05-23. CDC verification: _(pending CDC sign-off)_.
+Closed at commit `083976a` on 2026-05-23 (re-close `558e8ae`). CDC verification:
+**signed off 2026-05-23 (Claude/CDC session).** Verified: the task-as-process design
+(`erlmcp_task` holds status + monitored worker; `cancel/1` = `exit(Pid, cancelled)` —
+cancellation-as-exit, no token bookkeeping); `taskSupport` derived from the single
+`add_tool` map into `tools/list` + the `tasks` capability; **`cover_excl_mods` is `[]`**
+— every module in the codebase now under the gate (the capstone of the coverage arc).
+The scope-increase client methods (`list_tasks`/`get_task`/`get_task_result`/
+`cancel_task`) all route through the existing `request/4` with `<<"tasks">>` capability
+gating — reuse, not a fork. **M6a-11 correctly re-dispositioned `deferred`** (task
+conformance scenarios not in the harness; re-entry M6b-5). Toolchain figures
+(client_session 91%, aggregate 93%, 409 EUnit + 105 CT, Dialyzer/xref) rest on CI green;
+verified structurally from the code.
 Total rows: 15. Done: 14. Deferred: 1 (M6a-11). No-op: 0.
