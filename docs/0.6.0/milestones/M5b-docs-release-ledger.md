@@ -49,5 +49,15 @@
 
 ## Closure
 
-Closed at commit `d3d3a42` on 2026-05-24 (retroactive close). CDC verification: _(pending CDC sign-off)_.
+Closed at commit `d3d3a42` on 2026-05-24 (retroactive close). CDC verification:
+**signed off 2026-05-24 (Claude/CDC session).** Verified: the docs work at `db03e58`
+holds — anti-drift re-run is **clean** (no deleted-module references — `erlmcp_server`/
+`erlmcp_stdio_server`/`erlmcp_client` — in any live doc; the migration guide's
+references to the old API are legitimate left-column mappings), `add_resource_template`
+and the documented API cross-check against real exports, README is at 0.6.0 with the
+SemVer policy, and CodeQL (`security.yml`) + dependabot are wired. **M5b-8 is correctly
+recorded as an amendment:** no hand-maintained CHANGELOG, per owner decision — release
+discipline is SemVer + Git-tag/GitHub release notes (now a locked decision in CLAUDE.md).
+Nit for a future tidy: the "Closed at `d3d3a42`" SHA is the M6b close commit; the
+verified M5b substance is `db03e58` (cosmetic, not blocking). CI-gated rows rest on CI green.
 Total rows: 10. Done: 10. Deferred: 0. No-op: 0.
