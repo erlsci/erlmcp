@@ -213,11 +213,12 @@ directory_handler(_Args, Ctx) ->
     {ok, text(Payload)}.
 
 group_by_category(Tools) ->
-    lists:foldl(fun(T, Acc) ->
+    Grouped = lists:foldl(fun(T, Acc) ->
         Cat = maps:get(category, T, <<"uncategorized">>),
         Existing = maps:get(Cat, Acc, []),
-        Acc#{Cat => Existing ++ [T]}
-    end, #{}, Tools).
+        Acc#{Cat => [T | Existing]}
+    end, #{}, Tools),
+    maps:map(fun(_, V) -> lists:reverse(V) end, Grouped).
 
 %%====================================================================
 %% Resources (M2b)
@@ -268,28 +269,33 @@ log_message(Session, Level, Logger, Data) when is_pid(Session), is_atom(Level) -
 %%====================================================================
 
 -spec start_stdio_setup(atom(), map()) -> {ok, #{server := pid(), transport := pid()}}.
-start_stdio_setup(ServerId, Config) ->
+start_stdio_setup(ServerId, Config) when is_atom(ServerId) ->
     {ok, Server} = start_server(ServerId, Config),
-    TransId = list_to_atom(atom_to_list(ServerId) ++ "_stdio"),
+    TransId = make_transport_id(ServerId, <<"_stdio">>),
     {ok, Transport} = start_transport(TransId, stdio,
         #{session => Server, test_mode => maps:get(test_mode, Config, false)}),
     {ok, #{server => Server, transport => Transport}}.
 
 -spec start_tcp_setup(atom(), map(), map()) ->
     {ok, #{server := pid(), transport := pid()}}.
-start_tcp_setup(ServerId, ServerConfig, TcpConfig) ->
+start_tcp_setup(ServerId, ServerConfig, TcpConfig) when is_atom(ServerId) ->
     {ok, Server} = start_server(ServerId, ServerConfig),
-    TransId = list_to_atom(atom_to_list(ServerId) ++ "_tcp"),
+    TransId = make_transport_id(ServerId, <<"_tcp">>),
     {ok, Transport} = erlmcp_transport_tcp:start_link(
         TcpConfig#{owner => Server}),
     {ok, #{server => Server, transport => Transport, transport_id => TransId}}.
 
 -spec start_http_setup(atom(), map(), map()) ->
     {ok, #{server := pid(), transport := pid()}}.
-start_http_setup(ServerId, ServerConfig, HttpConfig) ->
+start_http_setup(ServerId, ServerConfig, HttpConfig) when is_atom(ServerId) ->
     {ok, Server} = start_server(ServerId, ServerConfig),
-    TransId = list_to_atom(atom_to_list(ServerId) ++ "_http"),
+    TransId = make_transport_id(ServerId, <<"_http">>),
     {ok, Transport} = erlmcp_transport_streamable_http:start_link(
         HttpConfig#{session => Server}),
     {ok, #{server => Server, transport => Transport, transport_id => TransId}}.
+
+%% ServerId is a developer-supplied atom; the suffix is a fixed binary.
+%% The resulting atom count is bounded by the number of servers started.
+make_transport_id(ServerId, Suffix) when is_atom(ServerId), is_binary(Suffix) ->
+    binary_to_atom(<<(atom_to_binary(ServerId, utf8))/binary, Suffix/binary>>, utf8).
 

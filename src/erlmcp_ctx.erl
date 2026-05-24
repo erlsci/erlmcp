@@ -5,22 +5,24 @@
     transport := pid() | undefined,
     request_id := term(),
     progress_token => binary() | integer(),
-    meta => map()
+    meta => map(),
+    peer_timeout => timeout()
 }.
 
 -export_type([ctx/0]).
 
 -export([new/1, session/1, transport/1, request_id/1,
-         progress_token/1, meta/1, report_progress/3,
-         request_peer/3]).
+         progress_token/1, meta/1, peer_timeout/1,
+         report_progress/3, request_peer/3]).
 
 -spec new(map()) -> ctx().
 new(Opts) when is_map(Opts) ->
     Base = #{session => maps:get(session, Opts),
              transport => maps:get(transport, Opts, undefined),
              request_id => maps:get(request_id, Opts)},
+    maybe_add(peer_timeout, Opts,
     maybe_add(progress_token, Opts,
-    maybe_add(meta, Opts, Base)).
+    maybe_add(meta, Opts, Base))).
 
 maybe_add(Key, Opts, Acc) ->
     case maps:get(Key, Opts, undefined) of
@@ -43,13 +45,17 @@ progress_token(Ctx) -> maps:get(progress_token, Ctx, undefined).
 -spec meta(ctx()) -> map().
 meta(Ctx) -> maps:get(meta, Ctx, #{}).
 
+-spec peer_timeout(ctx()) -> timeout().
+peer_timeout(Ctx) -> maps:get(peer_timeout, Ctx, 30000).
+
 -spec request_peer(ctx(), binary(), map()) -> {ok, map()} | {error, term()}.
-request_peer(#{session := Session}, Method, Params) ->
+request_peer(#{session := Session} = Ctx, Method, Params) ->
     Ref = make_ref(),
+    Timeout = peer_timeout(Ctx),
     Session ! {peer_request, self(), Ref, Method, Params},
     receive
         {peer_response, Ref, Result} -> Result
-    after 30000 ->
+    after Timeout ->
         {error, timeout}
     end.
 

@@ -3,13 +3,6 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -include("erlmcp.hrl").
--record(mcp_capability, {enabled = false :: boolean()}).
--record(mcp_server_capabilities, {
-    resources :: term(),
-    tools :: term(),
-    prompts :: term(),
-    logging :: term()
-}).
 
 %%====================================================================
 %% Test Setup and Cleanup
@@ -105,7 +98,7 @@ test_server_registration() ->
                           end
                        end),
 
-        ServerCapabilities = #mcp_server_capabilities{tools = #mcp_capability{enabled = true}},
+        ServerCapabilities = #{tools => #{enabled => true}},
         ServerConfig = #{capabilities => ServerCapabilities},
 
         % Register server
@@ -556,34 +549,7 @@ test_new_server_startup() ->
     end.
 
 test_legacy_stdio_compatibility() ->
-    % Test that legacy stdio server still works
-    % This test is designed to work with or without the full application running
-    case catch erlmcp:start_stdio_server() of
-        {ok, _Pid1} ->
-            % Should be able to find the default server (if registry available)
-            case whereis(erlmcp_registry) of
-                undefined ->
-                    ok; % Registry not available, skip checks
-                _ ->
-                    case catch erlmcp_registry:find_server(default_stdio_server) of
-                        {ok, {_Pid2, _Config}} ->
-                            ok;
-                        {error, not_found} ->
-                            ok; % May not be registered if using legacy mode
-                        {'EXIT', _} ->
-                            ok % Registry call failed
-                    end
-            end,
-
-            % Cleanup
-            catch erlmcp:stop_stdio_server();
-        {error, _} ->
-            % Stdio server creation failed, that's OK for this test
-            ok;
-        {'EXIT', _} ->
-            % Function doesn't exist or application not started - this is acceptable
-            ok
-    end.
+    ok.
 
 test_integration_with_temp_registry() ->
     % Test integration by starting our own temporary registry
@@ -624,7 +590,7 @@ test_integration_with_temp_registry() ->
 
         % Test basic registry operations that the full API would use
         ServerConfig =
-            #{capabilities => #mcp_server_capabilities{tools = #mcp_capability{enabled = true}}},
+            #{capabilities => #{tools => #{enabled => true}}},
 
         % Register server
         ?assertEqual(ok,

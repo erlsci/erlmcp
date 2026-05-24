@@ -9,12 +9,14 @@
     icons_in_tools_list/1,
     batch_mixed/1,
     batch_all_notifications/1,
-    batch_malformed_member/1
+    batch_malformed_member/1,
+    batch_response_routes_to_out_pending/1
 ]).
 
 all() ->
     [meta_passthrough, icons_in_tools_list,
-     batch_mixed, batch_all_notifications, batch_malformed_member].
+     batch_mixed, batch_all_notifications, batch_malformed_member,
+     batch_response_routes_to_out_pending].
 
 init_per_testcase(_TC, Config) ->
     {ok, Server} = erlmcp_server_session:start_link(#{
@@ -134,3 +136,51 @@ batch_malformed_member(Config) ->
     ?assert(is_list(RespBatch)),
     ?assert(length(RespBatch) >= 1),
     ?assert(is_process_alive(?config(server, Config))).
+
+%%====================================================================
+%% F-09 regression: batched response routes through out_pending
+%%====================================================================
+
+batch_response_routes_to_out_pending(Config) ->
+    Server = ?config(server, Config),
+    TestPid = self(),
+    ok = erlmcp:add_tool(Server, #{
+        name => <<"peer_call">>,
+        description => <<"Calls request_peer and returns the result">>,
+        input_schema => erlmcp_schema:object([]),
+        handler => fun(_Args, Ctx) ->
+            Result = erlmcp_ctx:request_peer(Ctx, <<"sampling/createMessage">>,
+                         #{<<"messages">> => []}),
+            TestPid ! {peer_result, Result},
+            {ok, erlmcp:text(<<"done">>)}
+        end
+    }),
+    _ = wait_send(),
+    ToolReq = erlmcp_json_rpc:encode_request(50, <<"tools/call">>, #{
+        <<"name">> => <<"peer_call">>,
+        <<"arguments">> => #{}
+    }),
+    erlmcp_server_session:send_message(Server, ToolReq),
+    OutboundReq = decode(wait_send()),
+    OutId = maps:get(<<"id">>, OutboundReq),
+    PeerResult = #{<<"role">> => <<"assistant">>,
+                   <<"content">> => #{<<"type">> => <<"text">>,
+                                      <<"text">> => <<"hello">>}},
+    BatchWithResponse = jsx:encode([
+        #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => OutId,
+          <<"result">> => PeerResult},
+        #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 99,
+          <<"method">> => <<"ping">>}
+    ]),
+    erlmcp_server_session:send_message(Server, BatchWithResponse),
+    PingResp = decode(wait_send()),
+    ?assert(is_list(PingResp)),
+    ?assertEqual(1, length(PingResp)),
+    receive
+        {peer_result, {ok, ReceivedResult}} ->
+            ?assertEqual(PeerResult, ReceivedResult)
+    after 5000 ->
+        ct:fail(peer_result_not_received)
+    end,
+    _ToolResp = wait_send(),
+    ?assert(is_process_alive(Server)).

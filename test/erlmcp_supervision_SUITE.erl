@@ -69,9 +69,6 @@ transport_sup_standalone(Config) ->
 sup_start_stop_server(Config) ->
     {ok, _} = application:ensure_all_started(erlmcp),
     ok = erlmcp_sup:stop_server(nonexistent),
-    ?assertEqual({error, removed}, erlmcp_sup:start_stdio_server()),
-    ?assertEqual({error, removed}, erlmcp_sup:start_stdio_server(#{})),
-    ok = erlmcp_sup:stop_stdio_server(),
     _ = Config.
 
 sup_start_stop_transport(Config) ->

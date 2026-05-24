@@ -2,13 +2,10 @@
 
 -behaviour(supervisor).
 
--export([start_link/0, start_server/2, stop_server/1, start_transport/3, stop_transport/1,
-         start_stdio_server/0, start_stdio_server/1, stop_stdio_server/0]).
+-export([start_link/0, start_server/2, stop_server/1, start_transport/3, stop_transport/1]).
 -export([init/1]).
 
 -include("erlmcp.hrl").
-
--define(SERVER, ?MODULE).
 
 %%====================================================================
 %% API Functions
@@ -16,7 +13,7 @@
 
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 %% Server management API
 -spec start_server(atom(), #{}) -> {ok, pid()} | {error, term()}.
@@ -62,21 +59,6 @@ stop_transport(TransportId) ->
         {error, not_found} ->
             ok
     end.
-
-%% Legacy stdio server support (for backward compatibility)
--spec start_stdio_server() -> {ok, pid()} | {error, term()}.
-start_stdio_server() ->
-    start_stdio_server(#{}).
-
--spec start_stdio_server(map()) -> {ok, pid()} | {error, term()}.
-start_stdio_server(_Options) ->
-    {error, removed}.
-
--spec stop_stdio_server() -> ok.
-stop_stdio_server() ->
-    _ = stop_transport(default_stdio_transport),
-    _ = stop_server(default_stdio_server),
-    ok.
 
 %%====================================================================
 %% supervisor callbacks

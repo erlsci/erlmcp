@@ -55,13 +55,4 @@ sup_stop_transport_not_found_test() ->
     ok = application:stop(erlmcp),
     timer:sleep(100).
 
-sup_legacy_stdio_removed_test() ->
-    ?assertEqual({error, removed}, erlmcp_sup:start_stdio_server()),
-    ?assertEqual({error, removed}, erlmcp_sup:start_stdio_server(#{})).
-
-sup_stop_stdio_test() ->
-    {ok, _} = application:ensure_all_started(erlmcp),
-    ?assertEqual(ok, erlmcp_sup:stop_stdio_server()),
-    ok = application:stop(erlmcp),
-    timer:sleep(100).
 

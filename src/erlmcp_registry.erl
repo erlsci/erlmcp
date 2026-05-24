@@ -4,15 +4,6 @@
 
 -include("erlmcp.hrl").
 
-%% Private records (relocated from include/erlmcp.hrl in M1-3)
--record(mcp_capability, {enabled = false :: boolean()}).
--record(mcp_server_capabilities, {
-    resources :: #mcp_capability{} | undefined,
-    tools :: #mcp_capability{} | undefined,
-    prompts :: #mcp_capability{} | undefined,
-    logging :: #mcp_capability{} | undefined
-}).
-
 %% API exports
 -export([start_link/0, register_server/3, register_transport/3, unregister_server/1,
          unregister_transport/1, find_server/1,
@@ -26,7 +17,7 @@
 -type server_id() :: atom() | binary().
 -type transport_id() :: atom() | binary().
 -type server_config() ::
-    #{capabilities => #mcp_server_capabilities{},
+    #{capabilities => map(),
       options => map(),
       _ => _}.
 -type transport_config() ::
@@ -42,7 +33,7 @@
         {servers = #{} :: #{server_id() => {pid(), server_config()}},
          transports = #{} :: #{transport_id() => {pid(), transport_config()}},
          server_transport_map = #{} :: #{transport_id() => server_id()},
-         capabilities = #{} :: #{server_id() => #mcp_server_capabilities{}},
+         capabilities = #{} :: #{server_id() => map()},
          monitors = #{} :: #{pid() => {server_id() | transport_id(), server | transport}},
          monitor_refs = #{} :: #{pid() => reference()}}).  % Track monitor references
 
@@ -158,7 +149,7 @@ handle_call({register_transport, TransportId, TransportPid, Config}, _From, Stat
                                      monitors = NewMonitors,
                                      monitor_refs = NewMonitorRefs},
 
-            % Auto-bind to server if specified in config
+            %% Auto-bind to server if specified in config
             FinalState =
                 case maps:get(server_id, Config, undefined) of
                     undefined ->
@@ -181,7 +172,7 @@ handle_call({register_transport, TransportId, TransportPid, Config}, _From, Stat
 handle_call({unregister_server, ServerId}, _From, State) ->
     case maps:take(ServerId, State#registry_state.servers) of
         {{ServerPid, _Config}, NewServers} ->
-            % Demonitor the process
+            %% Demonitor the process
             case maps:get(ServerPid, State#registry_state.monitor_refs, undefined) of
                 undefined ->
                     ok;
@@ -189,12 +180,12 @@ handle_call({unregister_server, ServerId}, _From, State) ->
                     demonitor(MonitorRef, [flush])
             end,
 
-            % Remove from monitors
+            %% Remove from monitors
             NewMonitors = maps:remove(ServerPid, State#registry_state.monitors),
             NewMonitorRefs = maps:remove(ServerPid, State#registry_state.monitor_refs),
-            % Remove capabilities
+            %% Remove capabilities
             NewCapabilities = maps:remove(ServerId, State#registry_state.capabilities),
-            % Remove any transport bindings
+            %% Remove any transport bindings
             NewTransportMap =
                 maps:filter(fun(_, SId) -> SId =/= ServerId end,
                             State#registry_state.server_transport_map),
@@ -214,7 +205,7 @@ handle_call({unregister_server, ServerId}, _From, State) ->
 handle_call({unregister_transport, TransportId}, _From, State) ->
     case maps:take(TransportId, State#registry_state.transports) of
         {{TransportPid, _Config}, NewTransports} ->
-            % Demonitor the process
+            %% Demonitor the process
             case maps:get(TransportPid, State#registry_state.monitor_refs, undefined) of
                 undefined ->
                     ok;
@@ -222,10 +213,10 @@ handle_call({unregister_transport, TransportId}, _From, State) ->
                     demonitor(MonitorRef, [flush])
             end,
 
-            % Remove from monitors
+            %% Remove from monitors
             NewMonitors = maps:remove(TransportPid, State#registry_state.monitors),
             NewMonitorRefs = maps:remove(TransportPid, State#registry_state.monitor_refs),
-            % Remove binding
+            %% Remove binding
             NewTransportMap = maps:remove(TransportId, State#registry_state.server_transport_map),
 
             NewState =
@@ -258,7 +249,7 @@ handle_call(list_servers, _From, State) ->
 handle_call(list_transports, _From, State) ->
     {reply, maps:to_list(State#registry_state.transports), State};
 handle_call({bind_transport_to_server, TransportId, ServerId}, _From, State) ->
-    % Verify both exist
+    %% Verify both exist
     ServerExists = maps:is_key(ServerId, State#registry_state.servers),
     TransportExists = maps:is_key(TransportId, State#registry_state.transports),
 
@@ -303,7 +294,7 @@ handle_info({'DOWN', MonitorRef, process, Pid, Reason}, State) ->
             NewState = cleanup_transport(Id, Pid, State),
             {noreply, NewState};
         undefined ->
-            % Try to demonitor in case it's a stale reference
+            %% Try to demonitor in case it's a stale reference
             catch demonitor(MonitorRef, [flush]),
             logger:warning("Unknown monitored process ~p died: ~p", [Pid, Reason]),
             {noreply, State}
@@ -313,7 +304,7 @@ handle_info(_Info, State) ->
 
 -spec terminate(term(), state()) -> ok.
 terminate(_Reason, State) ->
-    % Clean up all monitors
+    %% Clean up all monitors
     maps:foreach(fun(_Pid, MonitorRef) -> catch demonitor(MonitorRef, [flush]) end,
                  State#registry_state.monitor_refs),
     logger:info("MCP registry terminating"),
@@ -329,7 +320,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 -spec cleanup_server(server_id(), pid(), state()) -> state().
 cleanup_server(ServerId, ServerPid, State) ->
-    % Demonitor if we have a reference
+    %% Demonitor if we have a reference
     case maps:get(ServerPid, State#registry_state.monitor_refs, undefined) of
         undefined ->
             ok;
@@ -342,7 +333,7 @@ cleanup_server(ServerId, ServerPid, State) ->
     NewMonitors = maps:remove(ServerPid, State#registry_state.monitors),
     NewMonitorRefs = maps:remove(ServerPid, State#registry_state.monitor_refs),
 
-    % Remove any transport bindings
+    %% Remove any transport bindings
     NewTransportMap =
         maps:filter(fun(_, SId) -> SId =/= ServerId end,
                     State#registry_state.server_transport_map),
@@ -355,7 +346,7 @@ cleanup_server(ServerId, ServerPid, State) ->
 
 -spec cleanup_transport(transport_id(), pid(), state()) -> state().
 cleanup_transport(TransportId, TransportPid, State) ->
-    % Demonitor if we have a reference
+    %% Demonitor if we have a reference
     case maps:get(TransportPid, State#registry_state.monitor_refs, undefined) of
         undefined ->
             ok;
