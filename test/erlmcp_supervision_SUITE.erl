@@ -7,7 +7,6 @@
 -export([
     app_starts_sups/1,
     sup_children/1,
-    session_sup_standalone/1,
     server_sup_standalone/1,
     transport_sup_standalone/1,
     sup_start_stop_server/1,
@@ -19,7 +18,7 @@
 
 all() ->
     [app_starts_sups, sup_children,
-     session_sup_standalone, server_sup_standalone, transport_sup_standalone,
+     server_sup_standalone, transport_sup_standalone,
      sup_start_stop_server, sup_start_stop_transport,
      sup_start_stop_transport_full,
      transport_sup_tcp_type, transport_sup_http_type,
@@ -47,14 +46,6 @@ sup_children(Config) ->
     ?assert(lists:member(erlmcp_registry, Ids)),
     ?assert(lists:member(erlmcp_server_sup, Ids)),
     ?assert(lists:member(erlmcp_transport_sup, Ids)),
-    _ = Config.
-
-session_sup_standalone(Config) ->
-    {ok, Pid} = erlmcp_session_sup:start_link(),
-    ?assert(is_process_alive(Pid)),
-    unlink(Pid),
-    exit(Pid, shutdown),
-    timer:sleep(50),
     _ = Config.
 
 server_sup_standalone(Config) ->

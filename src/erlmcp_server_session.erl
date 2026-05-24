@@ -278,33 +278,35 @@ handle_operational_data(RawData, Data) ->
             keep_state_and_data
     end.
 
+%% Batch dispatch is intentionally synchronous and limited to intrinsic
+%% fast methods (ping, tools/list). All other methods return method_not_found.
+%% Do NOT extend dispatch_batch_request to handler-backed methods without
+%% adding per-member worker dispatch — that would block the FSM.
 handle_batch(Items, Data) ->
-    Responses = lists:filtermap(fun(Item) ->
+    {Responses, NewData} = lists:foldl(fun(Item, {RespAcc, DAcc}) ->
         case Item of
             {notification, _, _} ->
-                false;
+                {RespAcc, DAcc};
             {parse_error, Reason} ->
                 Json = erlmcp_json_rpc:encode_error_response(
                            null, erlmcp_json_rpc:invalid_request(),
                            iolist_to_binary(io_lib:format("~p", [Reason]))),
-                {true, Json};
+                {[Json | RespAcc], DAcc};
             {request, Id, Method, Params} ->
-                Json = dispatch_batch_request(Id, Method, Params, Data),
-                {true, Json};
-            {response, _, _} ->
-                false;
-            {error_response, _, _} ->
-                false;
-            _ ->
-                false
+                Json = dispatch_batch_request(Id, Method, Params, DAcc),
+                {[Json | RespAcc], DAcc};
+            {response, Id, Result} ->
+                {RespAcc, apply_outbound_response(Id, {ok, Result}, DAcc)};
+            {error_response, Id, Error} ->
+                {RespAcc, apply_outbound_response(Id, {error, Error}, DAcc)}
         end
-    end, Items),
+    end, {[], Data}, Items),
     case Responses of
-        [] -> keep_state_and_data;
+        [] -> {keep_state, NewData};
         _ ->
-            BatchJson = erlmcp_json_rpc:encode_batch(Responses),
-            send_raw(Data, BatchJson),
-            keep_state_and_data
+            BatchJson = erlmcp_json_rpc:encode_batch(lists:reverse(Responses)),
+            send_raw(NewData, BatchJson),
+            {keep_state, NewData}
     end.
 
 dispatch_batch_request(Id, <<"ping">>, _Params, _Data) ->
@@ -1133,6 +1135,15 @@ handle_outbound_response(Id, Result, Data) ->
             {keep_state, Data#data{out_pending = NewOutPending}};
         error ->
             keep_state_and_data
+    end.
+
+apply_outbound_response(Id, Result, Data) ->
+    case maps:take(Id, Data#data.out_pending) of
+        {{Caller, CallerRef}, NewOutPending} ->
+            Caller ! {peer_response, CallerRef, Result},
+            Data#data{out_pending = NewOutPending};
+        error ->
+            Data
     end.
 
 out_next_id(#data{out_next_id = Id} = Data) ->
