@@ -29,6 +29,7 @@
     pending = #{} :: #{pos_integer() => {pid(), reference()}},
     handlers :: map(),
     tools = #{} :: #{binary() => map()},
+    tasks = #{} :: #{binary() => pid()},
     out_pending = #{} :: #{pos_integer() => {pid(), reference()}},
     out_next_id = 1 :: pos_integer(),
     resources = #{} :: #{binary() => map()},
@@ -320,6 +321,15 @@ handle_operational_message({request, Id, <<"logging/setLevel">>, Params}, Data) 
 %% Completion
 handle_operational_message({request, Id, <<"completion/complete">>, Params}, Data) ->
     handle_completion_complete(Id, Params, Data);
+%% Tasks
+handle_operational_message({request, Id, <<"tasks/get">>, Params}, Data) ->
+    handle_tasks_get(Id, Params, Data);
+handle_operational_message({request, Id, <<"tasks/list">>, _Params}, Data) ->
+    handle_tasks_list(Id, Data);
+handle_operational_message({request, Id, <<"tasks/result">>, Params}, Data) ->
+    handle_tasks_result(Id, Params, Data);
+handle_operational_message({request, Id, <<"tasks/cancel">>, Params}, Data) ->
+    handle_tasks_cancel(Id, Params, Data);
 %% Outbound response (client responding to server-initiated request)
 handle_operational_message({response, Id, Result}, Data) ->
     handle_outbound_response(Id, {ok, Result}, Data);
@@ -429,7 +439,19 @@ handle_tools_call(Id, Params, Data) ->
                 ToolSpec ->
                     case validate_tool_input(ToolSpec, Args) of
                         ok ->
-                            dispatch_tool_call(Id, ToolName, Args, ToolSpec, Meta, Data);
+                            TaskSupport = maps:get(task_support, ToolSpec, forbidden),
+                            UseTask = maps:get(<<"_task">>, Meta, false),
+                            case TaskSupport =/= forbidden andalso UseTask of
+                                true ->
+                                    {TaskId, NewData} = start_task(
+                                        ToolName, Args, ToolSpec, Meta, Data),
+                                    send_response(Data, Id,
+                                        #{<<"taskId">> => TaskId}),
+                                    {keep_state, NewData};
+                                false ->
+                                    dispatch_tool_call(
+                                        Id, ToolName, Args, ToolSpec, Meta, Data)
+                            end;
                         {error, _} ->
                             send_error(Data, Id, erlmcp_json_rpc:invalid_params(),
                                        <<"Invalid tool arguments">>),
@@ -808,6 +830,95 @@ complete_template_param(UriTemplate, ArgName, Prefix, Data) ->
     end.
 
 %%====================================================================
+%% Tasks (M6a)
+%%====================================================================
+
+handle_tasks_get(Id, Params, Data) ->
+    TaskId = maps:get(<<"id">>, Params, undefined),
+    case maps:get(TaskId, Data#data.tasks, undefined) of
+        undefined ->
+            send_error(Data, Id, -32002, <<"Task not found">>),
+            keep_state_and_data;
+        TaskPid ->
+            {ok, Status} = erlmcp_task:get_status(TaskPid),
+            send_response(Data, Id, Status),
+            keep_state_and_data
+    end.
+
+handle_tasks_list(Id, Data) ->
+    TaskList = maps:fold(fun(_TaskId, TaskPid, Acc) ->
+        case is_process_alive(TaskPid) of
+            true ->
+                {ok, Status} = erlmcp_task:get_status(TaskPid),
+                [Status | Acc];
+            false ->
+                Acc
+        end
+    end, [], Data#data.tasks),
+    send_response(Data, Id, #{<<"tasks">> => TaskList}),
+    keep_state_and_data.
+
+handle_tasks_result(Id, Params, Data) ->
+    TaskId = maps:get(<<"id">>, Params, undefined),
+    case maps:get(TaskId, Data#data.tasks, undefined) of
+        undefined ->
+            send_error(Data, Id, -32002, <<"Task not found">>),
+            keep_state_and_data;
+        TaskPid ->
+            case erlmcp_task:get_result(TaskPid) of
+                {ok, Result} ->
+                    send_response(Data, Id, Result),
+                    keep_state_and_data;
+                {error, not_ready} ->
+                    send_error(Data, Id, -32002, <<"Task not ready">>),
+                    keep_state_and_data;
+                {error, _Reason} ->
+                    send_error(Data, Id, -32603, <<"Task failed">>),
+                    keep_state_and_data
+            end
+    end.
+
+handle_tasks_cancel(Id, Params, Data) ->
+    TaskId = maps:get(<<"id">>, Params, undefined),
+    case maps:get(TaskId, Data#data.tasks, undefined) of
+        undefined ->
+            send_error(Data, Id, -32002, <<"Task not found">>),
+            keep_state_and_data;
+        TaskPid ->
+            ok = erlmcp_task:cancel(TaskPid),
+            send_response(Data, Id, #{}),
+            keep_state_and_data
+    end.
+
+start_task(ToolName, Args, ToolSpec, Meta, Data) ->
+    TaskId = generate_task_id(),
+    Session = self(),
+    Transport = Data#data.transport,
+    ProgressToken = maps:get(<<"progressToken">>, Meta, TaskId),
+    Ctx = erlmcp_ctx:new(#{session => Session, transport => Transport,
+                           request_id => TaskId, progress_token => ProgressToken}),
+    Handler = maps:get(handler, ToolSpec, undefined),
+    HandlerMod = maps:get(handler_module, ToolSpec, undefined),
+    TaskHandler = case Handler of
+        Fun when is_function(Fun) -> Fun;
+        undefined when HandlerMod =/= undefined ->
+            fun(A, C) -> HandlerMod:handle_tool(ToolName, A, C) end
+    end,
+    {ok, TaskPid} = erlmcp_task_sup:start_task(#{
+        id => TaskId,
+        session => Session,
+        handler => TaskHandler,
+        args => Args,
+        ctx => Ctx
+    }),
+    NewTasks = maps:put(TaskId, TaskPid, Data#data.tasks),
+    {TaskId, Data#data{tasks = NewTasks}}.
+
+generate_task_id() ->
+    Int = erlang:unique_integer([positive]),
+    <<"task-", (integer_to_binary(Int))/binary>>.
+
+%%====================================================================
 %% Registration — tools (M2a)
 %%====================================================================
 
@@ -900,7 +1011,14 @@ derive_capabilities(Data) ->
         0 -> B2;
         _ -> B2#{<<"prompts">> => #{<<"listChanged">> => true}}
     end,
-    B3#{<<"logging">> => #{}, <<"completions">> => #{}}.
+    B4 = B3#{<<"logging">> => #{}, <<"completions">> => #{}},
+    HasTasks = lists:any(fun(T) ->
+        maps:get(task_support, T, forbidden) =/= forbidden
+    end, maps:values(Data#data.tools)),
+    case HasTasks of
+        true -> B4#{<<"tasks">> => #{}};
+        false -> B4
+    end.
 
 generate_instructions(Data) ->
     Tools = [T || T <- maps:values(Data#data.tools),
@@ -1075,10 +1193,14 @@ format_tool_for_list(Spec) ->
         undefined -> B2;
         Ann -> B2#{<<"annotations">> => format_annotations(Ann)}
     end,
+    B4 = case maps:get(task_support, Spec, undefined) of
+        undefined -> B3;
+        TaskSupport -> B3#{<<"taskSupport">> => atom_to_binary(TaskSupport, utf8)}
+    end,
     Meta = build_meta(Spec),
     case maps:size(Meta) of
-        0 -> B3;
-        _ -> B3#{<<"_meta">> => Meta}
+        0 -> B4;
+        _ -> B4#{<<"_meta">> => Meta}
     end.
 
 format_annotations(Ann) when is_map(Ann) ->

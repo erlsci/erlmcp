@@ -111,6 +111,13 @@ init([]) ->
            restart => permanent,
            shutdown => infinity,
            type => supervisor,
-           modules => [erlmcp_transport_sup]}],
+           modules => [erlmcp_transport_sup]},
+         % Task supervisor - manages long-running tasks
+         #{id => erlmcp_task_sup,
+           start => {erlmcp_task_sup, start_link, []},
+           restart => permanent,
+           shutdown => infinity,
+           type => supervisor,
+           modules => [erlmcp_task_sup]}],
 
     {ok, {SupFlags, ChildSpecs}}.

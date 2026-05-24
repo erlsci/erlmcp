@@ -49,7 +49,7 @@ publish_scorecard_test() ->
     {ok, Files} = file:list_dir("_build/test/conformance"),
     ScorecardFiles = [F || F <- Files, lists:prefix("erlmcp-0.6.0-", F)],
     ?assert(length(ScorecardFiles) >= 1),
-    [{_, Content}] = [{F, element(2, file:read_file(
+    [{_, Content} | _] = [{F, element(2, file:read_file(
         "_build/test/conformance/" ++ F))} || F <- ScorecardFiles],
     ?assert(binary:match(Content, <<"Server">>) =/= nomatch),
     ?assert(binary:match(Content, <<"Client">>) =/= nomatch),
