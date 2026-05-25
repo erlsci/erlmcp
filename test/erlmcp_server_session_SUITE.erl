@@ -737,7 +737,7 @@ tool_progress_token(Config) ->
     _ = receive_response(),
     gen_statem:stop(S).
 
-handler_module_tool_call(Config) ->
+handler_module_tool_call(_Config) ->
     {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"hm-test">>, version => <<"1.0">>,
         handler => test_calc_handler
