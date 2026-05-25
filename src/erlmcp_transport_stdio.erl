@@ -148,17 +148,21 @@ terminate(_Reason, _State) ->
 %% Internal
 %%====================================================================
 
+%% Route protocol I/O to the `user` I/O server explicitly, not the
+%% process group leader. Under the application supervisor tree the
+%% group leader is the application master (not real stdio); `user` is
+%% the registered I/O server bound to fd 0/1 under `erl -noshell`.
 -spec write_stdout(iodata()) -> ok | {error, term()}.
 write_stdout(Data) ->
     try
-        ok = io:put_chars([Data, $\n]),
+        ok = io:put_chars(user, [Data, $\n]),
         ok
     catch
         error:Reason -> {error, {io_error, Reason}}
     end.
 
 default_read() ->
-    io:get_line("").
+    io:get_line(user, "").
 
 read_loop(Parent, ReadFun) ->
     case process_raw_input(ReadFun()) of

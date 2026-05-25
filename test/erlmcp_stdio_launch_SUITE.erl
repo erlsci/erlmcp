@@ -1,42 +1,33 @@
 -module(erlmcp_stdio_launch_SUITE).
 
-%% Verifies that the sys.config logger configuration directs output to
-%% standard_error (not standard_io), which is required for stdio MCP
-%% servers where stdout must carry only JSON-RPC.
+%% Verifies the stdio transport configuration for Claude Desktop:
+%% - sys.config directs logs to standard_error
+%% - run.sh scripts load sys.config via -config
+%% - transport source targets the user I/O server
+%%
+%% The real round-trip (stdin→server→stdout over a pipe) is verified by
+%% test/scripts/test_stdio_roundtrip.sh, run outside the VM — launching
+%% a child Erlang VM from inside an existing one confuses the user I/O
+%% server's fd wiring.
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 
 -export([all/0, init_per_suite/1, end_per_suite/1]).
--export([logger_writes_to_stderr/1, sys_config_is_correct/1]).
+-export([sys_config_is_correct/1, run_sh_has_config_flag/1,
+         user_device_in_transport/1]).
 
 all() ->
-    [logger_writes_to_stderr, sys_config_is_correct].
+    [sys_config_is_correct, run_sh_has_config_flag, user_device_in_transport].
 
 init_per_suite(Config) ->
-    Config.
+    [{repo_root, find_repo_root()} | Config].
 
 end_per_suite(_Config) ->
     ok.
 
-%% Verify the default logger handler is configured for standard_error
-%% when sys.config is loaded. Skips in test runners that don't load it.
-logger_writes_to_stderr(_Config) ->
-    case logger:get_handler_config(default) of
-        {ok, #{config := #{type := standard_error}}} ->
-            ok;
-        {ok, #{config := #{type := standard_io}}} ->
-            {skip, "sys.config not loaded by test runner (logger on standard_io); "
-                   "verified via sys_config_is_correct instead"};
-        {ok, _} ->
-            {skip, "Handler config format unexpected"};
-        {error, _} ->
-            ct:fail("No default handler configured")
-    end.
-
-%% Verify the sys.config file itself specifies standard_error.
-sys_config_is_correct(_Config) ->
-    RepoRoot = find_repo_root(),
+sys_config_is_correct(Config) ->
+    RepoRoot = ?config(repo_root, Config),
     SysConfigPath = filename:join([RepoRoot, "config", "sys.config"]),
     {ok, [Terms]} = file:consult(SysConfigPath),
     KernelCfg = proplists:get_value(kernel, Terms),
@@ -44,6 +35,26 @@ sys_config_is_correct(_Config) ->
     {handler, default, logger_std_h, #{config := #{type := Type}}} =
         lists:keyfind(default, 2, LoggerCfg),
     ?assertEqual(standard_error, Type).
+
+run_sh_has_config_flag(Config) ->
+    RepoRoot = ?config(repo_root, Config),
+    Scripts = filelib:wildcard(
+        filename:join([RepoRoot, "examples", "*", "run.sh"])),
+    ?assert(length(Scripts) >= 3, "Expected at least 3 run.sh scripts"),
+    lists:foreach(fun(Script) ->
+        {ok, Content} = file:read_file(Script),
+        ?assert(binary:match(Content, <<"-config config/sys">>) =/= nomatch,
+            ["run.sh missing -config: ", Script])
+    end, Scripts).
+
+user_device_in_transport(Config) ->
+    RepoRoot = ?config(repo_root, Config),
+    SrcPath = filename:join([RepoRoot, "src", "erlmcp_transport_stdio.erl"]),
+    {ok, Content} = file:read_file(SrcPath),
+    ?assert(binary:match(Content, <<"io:get_line(user,">>) =/= nomatch,
+        "transport must read via io:get_line(user, ...)"),
+    ?assert(binary:match(Content, <<"io:put_chars(user,">>) =/= nomatch,
+        "transport must write via io:put_chars(user, ...)").
 
 %%====================================================================
 %% Internal

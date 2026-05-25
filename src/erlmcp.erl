@@ -274,6 +274,7 @@ start_stdio_setup(ServerId, Config) when is_atom(ServerId) ->
     TransId = make_transport_id(ServerId, <<"_stdio">>),
     {ok, Transport} = start_transport(TransId, stdio,
         #{session => Server, test_mode => maps:get(test_mode, Config, false)}),
+    ok = erlmcp_server_session:set_transport(Server, Transport),
     {ok, #{server => Server, transport => Transport}}.
 
 -spec start_tcp_setup(atom(), map(), map()) ->
@@ -283,6 +284,7 @@ start_tcp_setup(ServerId, ServerConfig, TcpConfig) when is_atom(ServerId) ->
     TransId = make_transport_id(ServerId, <<"_tcp">>),
     {ok, Transport} = erlmcp_transport_tcp:start_link(
         TcpConfig#{owner => Server}),
+    ok = erlmcp_server_session:set_transport(Server, Transport),
     {ok, #{server => Server, transport => Transport, transport_id => TransId}}.
 
 -spec start_http_setup(atom(), map(), map()) ->
@@ -292,6 +294,7 @@ start_http_setup(ServerId, ServerConfig, HttpConfig) when is_atom(ServerId) ->
     TransId = make_transport_id(ServerId, <<"_http">>),
     {ok, Transport} = erlmcp_transport_streamable_http:start_link(
         HttpConfig#{session => Server}),
+    ok = erlmcp_server_session:set_transport(Server, Transport),
     {ok, #{server => Server, transport => Transport, transport_id => TransId}}.
 
 %% ServerId is a developer-supplied atom; the suffix is a fixed binary.

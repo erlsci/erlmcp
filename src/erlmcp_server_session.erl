@@ -3,7 +3,7 @@
 -behaviour(gen_statem).
 
 %% M1 API
--export([start_link/1, send_message/2, get_instructions/1]).
+-export([start_link/1, send_message/2, set_transport/2, get_instructions/1]).
 %% Tools (M2a)
 -export([register_tool/2, unregister_tool/2, list_tools/1,
          register_handler/2]).
@@ -53,6 +53,10 @@ start_link(Opts) when is_map(Opts) ->
 -spec send_message(pid(), binary()) -> ok.
 send_message(Session, Data) when is_pid(Session), is_binary(Data) ->
     gen_statem:cast(Session, {transport_data, Data}).
+
+-spec set_transport(pid(), pid()) -> ok.
+set_transport(Session, Transport) when is_pid(Session), is_pid(Transport) ->
+    gen_statem:call(Session, {set_transport, Transport}).
 
 -spec register_tool(pid(), map()) -> ok | {error, term()}.
 register_tool(Session, ToolSpec) when is_pid(Session), is_map(ToolSpec) ->
@@ -216,6 +220,8 @@ terminate(_Reason, _State, _Data) ->
 
 handle_common_call(From, get_state, State, _Data) ->
     {keep_state_and_data, [{reply, From, State}]};
+handle_common_call(From, {set_transport, Transport}, _State, Data) ->
+    {keep_state, Data#data{transport = Transport}, [{reply, From, ok}]};
 %% Tools
 handle_common_call(From, {register_tool, ToolSpec}, _State, Data) ->
     do_register_tool(From, ToolSpec, Data);
