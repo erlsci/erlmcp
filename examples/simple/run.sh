@@ -5,5 +5,6 @@
 cd "$(dirname "$0")/../.." || exit 1
 rebar3 as simple compile >/dev/null 2>&1
 exec erl -noshell \
+  -config config/sys \
   -pa _build/simple/lib/*/ebin \
   -eval "simple_server:start()"
