@@ -270,6 +270,7 @@ log_message(Session, Level, Logger, Data) when is_pid(Session), is_atom(Level) -
 
 -spec start_stdio_setup(atom(), map()) -> {ok, #{server := pid(), transport := pid()}}.
 start_stdio_setup(ServerId, Config) when is_atom(ServerId) ->
+    _ = redirect_logger_to_stderr(),
     {ok, Server} = start_server(ServerId, Config),
     TransId = make_transport_id(ServerId, <<"_stdio">>),
     {ok, Transport} = start_transport(TransId, stdio,
@@ -298,4 +299,14 @@ start_http_setup(ServerId, ServerConfig, HttpConfig) when is_atom(ServerId) ->
 %% The resulting atom count is bounded by the number of servers started.
 make_transport_id(ServerId, Suffix) when is_atom(ServerId), is_binary(Suffix) ->
     binary_to_atom(<<(atom_to_binary(ServerId, utf8))/binary, Suffix/binary>>, utf8).
+
+%% Redirect the default logger handler to stderr so log output doesn't
+%% corrupt the JSON-RPC stream on the stdio transport.
+redirect_logger_to_stderr() ->
+    case logger:get_handler_config(default) of
+        {ok, #{config := HConfig}} ->
+            logger:set_handler_config(default, config, HConfig#{type => standard_error});
+        _ ->
+            ok
+    end.
 
