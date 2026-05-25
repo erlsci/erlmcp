@@ -159,7 +159,6 @@ resources_unsubscribe_silence(Config) ->
 %%====================================================================
 
 resources_list_changed(Config) ->
-    Server = ?config(server, Config),
     Srv = ?config(srv, Config),
     ok = erlmcp:add_resource(Srv, #{
         uri => <<"weather://forecast/london">>,
@@ -211,7 +210,6 @@ prompts_get_with_args(Config) ->
 %%====================================================================
 
 prompts_list_changed(Config) ->
-    Server = ?config(server, Config),
     Srv = ?config(srv, Config),
     ok = erlmcp:add_prompt(Srv, #{
         name => <<"temp_prompt">>,

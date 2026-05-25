@@ -67,49 +67,54 @@ run_server_scorecard() ->
 
 setup_conformance_server() ->
     {ok, _} = application:ensure_all_started(erlmcp),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => self(),
+    {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"conformance-server">>,
         version => <<"1.0">>,
-        capabilities => #{}
+        tools => [
+            #{name => <<"echo">>,
+              description => <<"Echo input">>,
+              input_schema => erlmcp_schema:object([
+                  erlmcp_schema:field(<<"msg">>, erlmcp_schema:string(), [required])
+              ]),
+              output_schema => erlmcp_schema:object([
+                  erlmcp_schema:field(<<"echo">>, erlmcp_schema:string(), [required])
+              ]),
+              category => <<"utility">>,
+              when_to_use => <<"When you need to echo text back">>,
+              annotations => #{readOnlyHint => true},
+              handler => fun(#{<<"msg">> := Msg}, _Ctx) ->
+                  {ok, erlmcp:text(Msg), #{<<"echo">> => Msg}}
+              end},
+            #{name => <<"crash_tool">>,
+              description => <<"Always crashes">>,
+              input_schema => erlmcp_schema:object([]),
+              handler => fun(_, _) -> error(intentional_crash) end},
+            #{name => <<"slow_tool">>,
+              description => <<"Slow tool for cancellation testing">>,
+              input_schema => erlmcp_schema:object([]),
+              handler => fun(_, _) -> receive after 10000 -> {ok, erlmcp:text(<<"done">>)} end end}
+        ],
+        resources => [
+            #{uri => <<"conf://data/1">>,
+              name => <<"Data 1">>,
+              description => <<"Test resource">>,
+              mime_type => <<"text/plain">>,
+              handler => fun(_Ctx) -> {ok, #{<<"uri">> => <<"conf://data/1">>,
+                                             <<"text">> => <<"resource content">>}} end}
+        ],
+        prompts => [
+            #{name => <<"summarize">>,
+              description => <<"Summarize text">>,
+              arguments => [#{name => <<"text">>, description => <<"Text to summarize">>, required => true}],
+              handler => fun(#{<<"text">> := Text}, _) ->
+                  {ok, [#{<<"role">> => <<"user">>,
+                          <<"content">> => #{<<"type">> => <<"text">>,
+                                             <<"text">> => <<"Summarize: ", Text/binary>>}}]}
+              end,
+              completions => #{<<"text">> => fun(_) -> [<<"sample text">>] end}}
+        ]
     }),
-    ok = erlmcp_server_session:register_tool(Server, #{
-        name => <<"echo">>,
-        description => <<"Echo input">>,
-        input_schema => erlmcp_schema:object([
-            erlmcp_schema:field(<<"msg">>, erlmcp_schema:string(), [required])
-        ]),
-        output_schema => erlmcp_schema:object([
-            erlmcp_schema:field(<<"echo">>, erlmcp_schema:string(), [required])
-        ]),
-        category => <<"utility">>,
-        when_to_use => <<"When you need to echo text back">>,
-        annotations => #{readOnlyHint => true},
-        handler => fun(#{<<"msg">> := Msg}, _Ctx) ->
-            {ok, erlmcp:text(Msg), #{<<"echo">> => Msg}}
-        end
-    }),
-    ok = erlmcp_server_session:register_tool(Server, #{
-        name => <<"crash_tool">>,
-        description => <<"Always crashes">>,
-        input_schema => erlmcp_schema:object([]),
-        handler => fun(_, _) -> error(intentional_crash) end
-    }),
-    ok = erlmcp_server_session:register_tool(Server, #{
-        name => <<"slow_tool">>,
-        description => <<"Slow tool for cancellation testing">>,
-        input_schema => erlmcp_schema:object([]),
-        handler => fun(_, _) -> receive after 10000 -> {ok, erlmcp:text(<<"done">>)} end end
-    }),
-    ok = erlmcp_server_session:register_resource(Server, #{
-        uri => <<"conf://data/1">>,
-        name => <<"Data 1">>,
-        description => <<"Test resource">>,
-        mime_type => <<"text/plain">>,
-        handler => fun(_Ctx) -> {ok, #{<<"uri">> => <<"conf://data/1">>,
-                                       <<"text">> => <<"resource content">>}} end
-    }),
-    ok = erlmcp_server_session:register_resource_template(Server, #{
+    ok = erlmcp_server:register_resource_template(Srv, #{
         uri_template => <<"conf://data/{id}">>,
         name => <<"Data item">>,
         handler => fun(#{<<"id">> := Id}, _Ctx) ->
@@ -118,18 +123,12 @@ setup_conformance_server() ->
         end,
         completions => #{<<"id">> => fun(_) -> [<<"1">>, <<"2">>, <<"3">>] end}
     }),
-    ok = erlmcp_server_session:register_prompt(Server, #{
-        name => <<"summarize">>,
-        description => <<"Summarize text">>,
-        arguments => [#{name => <<"text">>, description => <<"Text to summarize">>, required => true}],
-        handler => fun(#{<<"text">> := Text}, _) ->
-            {ok, [#{<<"role">> => <<"user">>,
-                    <<"content">> => #{<<"type">> => <<"text">>,
-                                       <<"text">> => <<"Summarize: ", Text/binary>>}}]}
-        end,
-        completions => #{<<"text">> => fun(_) -> [<<"sample text">>] end}
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"conformance-server">>, version => <<"1.0">>
     }),
-    Server.
+    Session.
 
 %%====================================================================
 %% L0 scenarios — protocol basics
@@ -156,9 +155,9 @@ scenario_ping(Server) ->
     end.
 
 scenario_version_negotiation(_Server) ->
+    R2 = erlmcp_reply:new_device(self()),
     {ok, S2} = erlmcp_server_session:start_link(#{
-        transport => self(), name => <<"t">>, version => <<"1.0">>,
-        capabilities => #{}
+        responder => R2, name => <<"t">>, version => <<"1.0">>
     }),
     Resp = send_req(S2, 1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"1999-01-01">>,
@@ -171,9 +170,9 @@ scenario_version_negotiation(_Server) ->
     end.
 
 scenario_pre_init_rejected(_Server) ->
+    R2 = erlmcp_reply:new_device(self()),
     {ok, S2} = erlmcp_server_session:start_link(#{
-        transport => self(), name => <<"t">>, version => <<"1.0">>,
-        capabilities => #{}
+        responder => R2, name => <<"t">>, version => <<"1.0">>
     }),
     Resp = send_req(S2, 1, <<"ping">>, #{}),
     gen_statem:stop(S2),
@@ -262,7 +261,7 @@ scenario_resources_templates(Server) ->
 scenario_resources_subscribe(Server) ->
     _ = send_req(Server, 11, <<"resources/subscribe">>,
                  #{<<"uri">> => <<"conf://data/1">>}),
-    erlmcp_server_session:notify_resource_updated(Server, <<"conf://data/1">>),
+    gen_statem:cast(Server, {resource_updated, <<"conf://data/1">>}),
     Notif = decode(wait_send()),
     _ = send_req(Server, 12, <<"resources/unsubscribe">>,
                  #{<<"uri">> => <<"conf://data/1">>}),

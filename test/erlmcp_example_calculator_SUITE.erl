@@ -141,7 +141,6 @@ annotations_present(Config) ->
     ?assertEqual(true, maps:get(<<"readOnlyHint">>, Ann)).
 
 list_changed_on_add_remove(Config) ->
-    Server = ?config(server, Config),
     Srv = ?config(srv, Config),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"temp">>,

@@ -193,7 +193,6 @@ tools_list_shows_registered(Config) ->
 %%====================================================================
 
 unknown_tool_error(Config) ->
-    Server = ?config(server, Config),
     Session = ?config(session, Config),
     initialize(Session),
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
