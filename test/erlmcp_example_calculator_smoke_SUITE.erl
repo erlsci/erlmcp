@@ -11,21 +11,25 @@ all() ->
     [start_stop, add_tool, divide_by_zero, directory_tool, task_tool].
 
 init_per_testcase(_TC, Config) ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => self(),
+    {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"calc-smoke">>,
         version => <<"1.0">>,
-        capabilities => #{}
+        handler => calculator_server
     }),
-    ok = erlmcp:register_handler(Server, calculator_server),
-    ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
-    ok = erlmcp:add_tool(Server, calculator_server:slow_tool_spec()),
+    ok = erlmcp:add_tool(Srv, erlmcp:make_directory_tool()),
+    ok = erlmcp:add_tool(Srv, calculator_server:slow_tool_spec()),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"calc-smoke">>, version => <<"1.0">>
+    }),
     _ = drain_notifications(),
-    initialize(Server),
-    [{server, Server} | Config].
+    initialize(Session),
+    [{server, Session}, {srv, Srv} | Config].
 
 end_per_testcase(_TC, Config) ->
     catch gen_statem:stop(?config(server, Config)),
+    catch gen_server:stop(?config(srv, Config)),
     ok.
 
 start_stop(Config) ->

@@ -42,7 +42,7 @@
               resource_spec/0, prompt_spec/0]).
 
 %%====================================================================
-%% Server management — uses new session model
+%% Server management
 %%====================================================================
 
 -spec start_server(server_id()) -> {ok, pid()} | {error, term()}.
@@ -52,7 +52,7 @@ start_server(ServerId) ->
 -spec start_server(server_id(), map()) -> {ok, pid()} | {error, term()}.
 start_server(ServerId, Config) ->
     Opts = Config#{name => atom_to_binary(ServerId, utf8)},
-    erlmcp_server_session:start_link(Opts).
+    erlmcp_server:start_link(Opts).
 
 -spec stop_server(server_id()) -> ok | {error, term()}.
 stop_server(ServerId) ->
@@ -139,16 +139,16 @@ unbind_transport(TransportId) ->
 %%====================================================================
 
 -spec add_tool(pid(), tool_spec()) -> ok | {error, term()}.
-add_tool(Session, ToolSpec) when is_pid(Session), is_map(ToolSpec) ->
-    erlmcp_server_session:register_tool(Session, ToolSpec).
+add_tool(Server, ToolSpec) when is_pid(Server), is_map(ToolSpec) ->
+    erlmcp_server:register_tool(Server, ToolSpec).
 
 -spec remove_tool(pid(), binary()) -> ok.
-remove_tool(Session, ToolName) when is_pid(Session), is_binary(ToolName) ->
-    erlmcp_server_session:unregister_tool(Session, ToolName).
+remove_tool(Server, ToolName) when is_pid(Server), is_binary(ToolName) ->
+    erlmcp_server:unregister_tool(Server, ToolName).
 
 -spec register_handler(pid(), module()) -> ok.
-register_handler(Session, Module) when is_pid(Session), is_atom(Module) ->
-    erlmcp_server_session:register_handler(Session, Module).
+register_handler(Server, Module) when is_pid(Server), is_atom(Module) ->
+    erlmcp_server:register_handler(Server, Module).
 
 %%====================================================================
 %% Content constructors (M2a)
@@ -191,13 +191,17 @@ make_directory_tool() ->
     }.
 
 -spec conformance_tools(pid()) -> [tool_spec()].
-conformance_tools(Session) ->
-    AllTools = erlmcp_server_session:list_tools(Session),
+conformance_tools(Server) ->
+    Tab = erlmcp_server:catalog_table(Server),
+    AllTools = maps:values(erlmcp_server:get_tools(Tab)),
     [T || T <- AllTools, maps:get(is_directory, T, false) =/= true].
 
 directory_handler(_Args, Ctx) ->
-    Session = erlmcp_ctx:session(Ctx),
-    AllTools = erlmcp_server_session:list_tools(Session),
+    Tab = erlmcp_ctx:server_ref(Ctx),
+    AllTools = case Tab of
+        undefined -> [];
+        _ -> maps:values(erlmcp_server:get_tools(Tab))
+    end,
     Tools = [T || T <- AllTools, maps:get(is_directory, T, false) =/= true],
     Categorized = group_by_category(Tools),
     Entries = maps:fold(fun(Cat, CatTools, Acc) ->
@@ -225,36 +229,36 @@ group_by_category(Tools) ->
 %%====================================================================
 
 -spec add_resource(pid(), resource_spec()) -> ok.
-add_resource(Session, Spec) when is_pid(Session), is_map(Spec) ->
-    erlmcp_server_session:register_resource(Session, Spec).
+add_resource(Server, Spec) when is_pid(Server), is_map(Spec) ->
+    erlmcp_server:register_resource(Server, Spec).
 
 -spec remove_resource(pid(), binary()) -> ok.
-remove_resource(Session, Uri) when is_pid(Session), is_binary(Uri) ->
-    erlmcp_server_session:unregister_resource(Session, Uri).
+remove_resource(Server, Uri) when is_pid(Server), is_binary(Uri) ->
+    erlmcp_server:unregister_resource(Server, Uri).
 
 -spec add_resource_template(pid(), resource_spec()) -> ok.
-add_resource_template(Session, Spec) when is_pid(Session), is_map(Spec) ->
-    erlmcp_server_session:register_resource_template(Session, Spec).
+add_resource_template(Server, Spec) when is_pid(Server), is_map(Spec) ->
+    erlmcp_server:register_resource_template(Server, Spec).
 
 -spec remove_resource_template(pid(), binary()) -> ok.
-remove_resource_template(Session, UriTemplate) when is_pid(Session), is_binary(UriTemplate) ->
-    erlmcp_server_session:unregister_resource_template(Session, UriTemplate).
+remove_resource_template(Server, UriTemplate) when is_pid(Server), is_binary(UriTemplate) ->
+    erlmcp_server:unregister_resource_template(Server, UriTemplate).
 
 -spec notify_resource_updated(pid(), binary()) -> ok.
 notify_resource_updated(Session, Uri) when is_pid(Session), is_binary(Uri) ->
-    erlmcp_server_session:notify_resource_updated(Session, Uri).
+    gen_statem:cast(Session, {resource_updated, Uri}).
 
 %%====================================================================
 %% Prompts (M2b)
 %%====================================================================
 
 -spec add_prompt(pid(), prompt_spec()) -> ok.
-add_prompt(Session, Spec) when is_pid(Session), is_map(Spec) ->
-    erlmcp_server_session:register_prompt(Session, Spec).
+add_prompt(Server, Spec) when is_pid(Server), is_map(Spec) ->
+    erlmcp_server:register_prompt(Server, Spec).
 
 -spec remove_prompt(pid(), binary()) -> ok.
-remove_prompt(Session, Name) when is_pid(Session), is_binary(Name) ->
-    erlmcp_server_session:unregister_prompt(Session, Name).
+remove_prompt(Server, Name) when is_pid(Server), is_binary(Name) ->
+    erlmcp_server:unregister_prompt(Server, Name).
 
 %%====================================================================
 %% Logging (M2b)
@@ -268,34 +272,41 @@ log_message(Session, Level, Logger, Data) when is_pid(Session), is_atom(Level) -
 %% Convenience setup (M4)
 %%====================================================================
 
--spec start_stdio_setup(atom(), map()) -> {ok, #{server := pid(), transport := pid()}}.
+-spec start_stdio_setup(atom(), map()) -> {ok, #{server := pid(), session := pid(), transport := pid()}}.
 start_stdio_setup(ServerId, Config) when is_atom(ServerId) ->
     {ok, Server} = start_server(ServerId, Config),
+    Responder = maps:get(responder, Config, undefined),
+    {ok, Session} = erlmcp_server_session:start_link(
+        #{server => Server, responder => Responder,
+          name => atom_to_binary(ServerId, utf8)}),
     TransId = make_transport_id(ServerId, <<"_stdio">>),
     {ok, Transport} = start_transport(TransId, stdio,
-        #{session => Server, test_mode => maps:get(test_mode, Config, false)}),
-    ok = erlmcp_server_session:set_transport(Server, Transport),
-    {ok, #{server => Server, transport => Transport}}.
+        #{session => Session, test_mode => maps:get(test_mode, Config, false)}),
+    {ok, #{server => Server, session => Session, transport => Transport}}.
 
 -spec start_tcp_setup(atom(), map(), map()) ->
-    {ok, #{server := pid(), transport := pid()}}.
+    {ok, #{server := pid(), session := pid(), transport := pid()}}.
 start_tcp_setup(ServerId, ServerConfig, TcpConfig) when is_atom(ServerId) ->
     {ok, Server} = start_server(ServerId, ServerConfig),
+    {ok, Session} = erlmcp_server_session:start_link(
+        #{server => Server, name => atom_to_binary(ServerId, utf8)}),
     TransId = make_transport_id(ServerId, <<"_tcp">>),
     {ok, Transport} = erlmcp_transport_tcp:start_link(
-        TcpConfig#{owner => Server}),
-    ok = erlmcp_server_session:set_transport(Server, Transport),
-    {ok, #{server => Server, transport => Transport, transport_id => TransId}}.
+        TcpConfig#{owner => Session}),
+    {ok, #{server => Server, session => Session,
+           transport => Transport, transport_id => TransId}}.
 
 -spec start_http_setup(atom(), map(), map()) ->
-    {ok, #{server := pid(), transport := pid()}}.
+    {ok, #{server := pid(), session := pid(), transport := pid()}}.
 start_http_setup(ServerId, ServerConfig, HttpConfig) when is_atom(ServerId) ->
     {ok, Server} = start_server(ServerId, ServerConfig),
+    {ok, Session} = erlmcp_server_session:start_link(
+        #{server => Server, name => atom_to_binary(ServerId, utf8)}),
     TransId = make_transport_id(ServerId, <<"_http">>),
     {ok, Transport} = erlmcp_transport_streamable_http:start_link(
-        HttpConfig#{session => Server}),
-    ok = erlmcp_server_session:set_transport(Server, Transport),
-    {ok, #{server => Server, transport => Transport, transport_id => TransId}}.
+        HttpConfig#{session => Session}),
+    {ok, #{server => Server, session => Session,
+           transport => Transport, transport_id => TransId}}.
 
 %% ServerId is a developer-supplied atom; the suffix is a fixed binary.
 %% The resulting atom count is bounded by the number of servers started.

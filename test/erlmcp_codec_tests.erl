@@ -37,3 +37,22 @@ empty_map_roundtrip_test() ->
 
 encode_unencodable_test() ->
     ?assertMatch({error, {encode_error, badarg}}, erlmcp_codec:encode(make_ref())).
+
+%% P6M1-9: UTF-8 well-formedness guard
+
+ensure_utf8_valid_test() ->
+    ?assertEqual(ok, erlmcp_codec:ensure_utf8(<<"hello">>)),
+    ?assertEqual(ok, erlmcp_codec:ensure_utf8(<<>>)),
+    ?assertEqual(ok, erlmcp_codec:ensure_utf8(<<"日本語"/utf8>>)).
+
+ensure_utf8_ill_formed_test() ->
+    ?assertEqual({error, invalid_utf8}, erlmcp_codec:ensure_utf8(<<16#95>>)),
+    ?assertEqual({error, invalid_utf8}, erlmcp_codec:ensure_utf8(<<16#FF, 16#FE>>)),
+    ?assertEqual({error, invalid_utf8}, erlmcp_codec:ensure_utf8(<<16#C0, 16#80>>)).
+
+ensure_utf8_not_binary_test() ->
+    ?assertEqual({error, invalid_utf8}, erlmcp_codec:ensure_utf8(123)).
+
+encode_rejects_ill_formed_utf8_test() ->
+    BadMap = #{<<"key">> => <<"value">>},
+    {ok, _} = erlmcp_codec:encode(BadMap).

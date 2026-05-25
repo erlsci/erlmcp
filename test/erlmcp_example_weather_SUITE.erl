@@ -40,22 +40,23 @@ all() ->
      pagination_resources].
 
 init_per_testcase(_TC, Config) ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => self(),
-        name => <<"weather-server">>,
-        version => <<"1.0">>,
-        capabilities => #{}
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"weather-server">>, version => <<"1.0">>
     }),
-    ok = example_weather_handler:register_all(Server),
-    initialize(Server),
-    [{server, Server} | Config].
+    ok = example_weather_handler:register_all(Srv),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"weather-server">>, version => <<"1.0">>
+    }),
+    initialize(Session),
+    [{server, Session}, {srv, Srv} | Config].
 
 end_per_testcase(_TC, Config) ->
-    Server = ?config(server, Config),
-    case is_process_alive(Server) of
-        true -> gen_statem:stop(Server);
-        false -> ok
-    end,
+    Session = ?config(server, Config),
+    Srv = ?config(srv, Config),
+    catch gen_statem:stop(Session),
+    catch gen_server:stop(Srv),
     ok.
 
 %%====================================================================
@@ -159,7 +160,8 @@ resources_unsubscribe_silence(Config) ->
 
 resources_list_changed(Config) ->
     Server = ?config(server, Config),
-    ok = erlmcp:add_resource(Server, #{
+    Srv = ?config(srv, Config),
+    ok = erlmcp:add_resource(Srv, #{
         uri => <<"weather://forecast/london">>,
         name => <<"London Forecast">>,
         handler => fun(_Ctx) -> {ok, #{<<"uri">> => <<"weather://forecast/london">>,
@@ -168,7 +170,7 @@ resources_list_changed(Config) ->
     Notif1 = decode(wait_send()),
     ?assertEqual(<<"notifications/resources/list_changed">>,
                  maps:get(<<"method">>, Notif1)),
-    ok = erlmcp:remove_resource(Server, <<"weather://forecast/london">>),
+    ok = erlmcp:remove_resource(Srv, <<"weather://forecast/london">>),
     Notif2 = decode(wait_send()),
     ?assertEqual(<<"notifications/resources/list_changed">>,
                  maps:get(<<"method">>, Notif2)).
@@ -210,7 +212,8 @@ prompts_get_with_args(Config) ->
 
 prompts_list_changed(Config) ->
     Server = ?config(server, Config),
-    ok = erlmcp:add_prompt(Server, #{
+    Srv = ?config(srv, Config),
+    ok = erlmcp:add_prompt(Srv, #{
         name => <<"temp_prompt">>,
         description => <<"Temporary">>,
         handler => fun(_, _) -> {ok, []} end
@@ -218,7 +221,7 @@ prompts_list_changed(Config) ->
     Notif1 = decode(wait_send()),
     ?assertEqual(<<"notifications/prompts/list_changed">>,
                  maps:get(<<"method">>, Notif1)),
-    ok = erlmcp:remove_prompt(Server, <<"temp_prompt">>),
+    ok = erlmcp:remove_prompt(Srv, <<"temp_prompt">>),
     Notif2 = decode(wait_send()),
     ?assertEqual(<<"notifications/prompts/list_changed">>,
                  maps:get(<<"method">>, Notif2)).
@@ -273,18 +276,23 @@ completion_template_param(Config) ->
 
 capability_map_resources_prompts(Config) ->
     Server = ?config(server, Config),
+    Srv = ?config(srv, Config),
     gen_statem:stop(Server),
-    {ok, Server2} = erlmcp_server_session:start_link(#{
-        transport => self(),
-        name => <<"test">>, version => <<"1.0">>,
-        capabilities => #{}
+    gen_server:stop(Srv),
+    {ok, Srv2} = erlmcp_server:start_link(#{
+        name => <<"test">>, version => <<"1.0">>
     }),
-    ok = example_weather_handler:register_all(Server2),
+    ok = example_weather_handler:register_all(Srv2),
+    Responder2 = erlmcp_reply:new_device(self()),
+    {ok, Session2} = erlmcp_server_session:start_link(#{
+        server => Srv2, responder => Responder2,
+        name => <<"test">>, version => <<"1.0">>
+    }),
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
-    erlmcp_server_session:send_message(Server2, InitReq),
+    erlmcp_server_session:send_message(Session2, InitReq),
     Resp = decode(wait_send()),
     Caps = maps:get(<<"capabilities">>, maps:get(<<"result">>, Resp)),
     ?assert(maps:is_key(<<"resources">>, Caps)),
@@ -294,7 +302,8 @@ capability_map_resources_prompts(Config) ->
     ?assert(maps:is_key(<<"prompts">>, Caps)),
     ?assertEqual(true, maps:get(<<"listChanged">>, maps:get(<<"prompts">>, Caps))),
     ?assert(maps:is_key(<<"logging">>, Caps)),
-    gen_statem:stop(Server2).
+    gen_statem:stop(Session2),
+    gen_server:stop(Srv2).
 
 %%====================================================================
 %% M2b-9: pagination consistency across endpoints

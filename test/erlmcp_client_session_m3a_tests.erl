@@ -18,13 +18,17 @@ bridge(Peer) ->
 setup_pair() ->
     SBridge = spawn_link(fun() -> bridge(undefined) end),
     CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"test-server">>, version => <<"1.0">>,
+        handler => example_calculator_handler
+    }),
+    ok = example_weather_handler:register_all(Srv),
+    Responder = erlmcp_reply:new_device(SBridge),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => SBridge,
+        server => Srv, responder => Responder,
         name => <<"test-server">>, version => <<"1.0">>,
         capabilities => #{}
     }),
-    ok = erlmcp:register_handler(Server, example_calculator_handler),
-    ok = example_weather_handler:register_all(Server),
     {ok, Client} = erlmcp_client_session:start_link(#{
         transport => CBridge,
         owner => self(),

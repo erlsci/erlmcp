@@ -36,18 +36,27 @@ all() ->
      progress_notification].
 
 init_per_testcase(_TC, Config) ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => self(),
+    {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"test-server">>,
-        version => <<"1.0">>,
+        version => <<"1.0">>
+    }),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"test-server">>, version => <<"1.0">>,
         capabilities => #{}
     }),
-    [{server, Server} | Config].
+    [{server, Srv}, {session, Session} | Config].
 
 end_per_testcase(_TC, Config) ->
-    Server = ?config(server, Config),
-    case is_process_alive(Server) of
-        true -> gen_statem:stop(Server);
+    Session = ?config(session, Config),
+    Srv = ?config(server, Config),
+    case is_process_alive(Session) of
+        true -> gen_statem:stop(Session);
+        false -> ok
+    end,
+    case is_process_alive(Srv) of
+        true -> gen_server:stop(Srv);
         false -> ok
     end,
     ok.
@@ -56,12 +65,12 @@ end_per_testcase(_TC, Config) ->
 %% Helpers
 %%====================================================================
 
-initialize(Server) ->
+initialize(Session) ->
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
-    erlmcp_server_session:send_message(Server, InitReq),
+    erlmcp_server_session:send_message(Session, InitReq),
     _InitResp = wait_send(),
     ok.
 
@@ -78,6 +87,7 @@ decode(Json) ->
 
 add_tool_and_call(Config) ->
     Server = ?config(server, Config),
+    Session = ?config(session, Config),
     Schema = erlmcp_schema:object([
         erlmcp_schema:field(<<"x">>, erlmcp_schema:number(), [required])
     ]),
@@ -89,12 +99,12 @@ add_tool_and_call(Config) ->
             {ok, erlmcp:text(list_to_binary(integer_to_list(trunc(X * 2))))}
         end
     }),
-    initialize(Server),
+    initialize(Session),
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
         <<"name">> => <<"double">>,
         <<"arguments">> => #{<<"x">> => 21}
     }),
-    erlmcp_server_session:send_message(Server, CallReq),
+    erlmcp_server_session:send_message(Session, CallReq),
     Resp = decode(wait_send()),
     ?assertEqual(2, maps:get(<<"id">>, Resp)),
     Result = maps:get(<<"result">>, Resp),
@@ -108,13 +118,14 @@ add_tool_and_call(Config) ->
 
 handler_behaviour(Config) ->
     Server = ?config(server, Config),
+    Session = ?config(session, Config),
     ok = erlmcp:register_handler(Server, test_calc_handler),
-    initialize(Server),
+    initialize(Session),
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
         <<"name">> => <<"add">>,
         <<"arguments">> => #{<<"a">> => 3, <<"b">> => 4}
     }),
-    erlmcp_server_session:send_message(Server, CallReq),
+    erlmcp_server_session:send_message(Session, CallReq),
     Resp = decode(wait_send()),
     Result = maps:get(<<"result">>, Resp),
     [Content] = maps:get(<<"content">>, Result),
@@ -126,6 +137,7 @@ handler_behaviour(Config) ->
 
 input_validation_rejects(Config) ->
     Server = ?config(server, Config),
+    Session = ?config(session, Config),
     Schema = erlmcp_schema:object([
         erlmcp_schema:field(<<"name">>, erlmcp_schema:string(), [required])
     ]),
@@ -140,12 +152,12 @@ input_validation_rejects(Config) ->
             {ok, erlmcp:text(<<"hi">>)}
         end
     }),
-    initialize(Server),
+    initialize(Session),
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
         <<"name">> => <<"greet">>,
         <<"arguments">> => #{}
     }),
-    erlmcp_server_session:send_message(Server, CallReq),
+    erlmcp_server_session:send_message(Session, CallReq),
     Resp = decode(wait_send()),
     ?assertMatch(#{<<"error">> := #{<<"code">> := -32602}}, Resp),
     receive {handler_called, Ref} -> ct:fail(handler_should_not_run)
@@ -158,15 +170,16 @@ input_validation_rejects(Config) ->
 
 tools_list_shows_registered(Config) ->
     Server = ?config(server, Config),
+    Session = ?config(session, Config),
     ok = erlmcp:add_tool(Server, #{
         name => <<"foo">>,
         description => <<"Foo tool">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
     }),
-    initialize(Server),
+    initialize(Session),
     ListReq = erlmcp_json_rpc:encode_request(2, <<"tools/list">>, #{}),
-    erlmcp_server_session:send_message(Server, ListReq),
+    erlmcp_server_session:send_message(Session, ListReq),
     Resp = decode(wait_send()),
     Result = maps:get(<<"result">>, Resp),
     Tools = maps:get(<<"tools">>, Result),
@@ -181,12 +194,13 @@ tools_list_shows_registered(Config) ->
 
 unknown_tool_error(Config) ->
     Server = ?config(server, Config),
-    initialize(Server),
+    Session = ?config(session, Config),
+    initialize(Session),
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
         <<"name">> => <<"nonexistent">>,
         <<"arguments">> => #{}
     }),
-    erlmcp_server_session:send_message(Server, CallReq),
+    erlmcp_server_session:send_message(Session, CallReq),
     Resp = decode(wait_send()),
     ?assertMatch(#{<<"error">> := #{<<"code">> := -32602}}, Resp).
 
@@ -196,6 +210,7 @@ unknown_tool_error(Config) ->
 
 tool_annotations_in_list(Config) ->
     Server = ?config(server, Config),
+    Session = ?config(session, Config),
     ok = erlmcp:add_tool(Server, #{
         name => <<"safe">>,
         description => <<"A safe tool">>,
@@ -203,9 +218,9 @@ tool_annotations_in_list(Config) ->
         annotations => #{readOnlyHint => true, title => <<"Safe Tool">>},
         handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
     }),
-    initialize(Server),
+    initialize(Session),
     ListReq = erlmcp_json_rpc:encode_request(2, <<"tools/list">>, #{}),
-    erlmcp_server_session:send_message(Server, ListReq),
+    erlmcp_server_session:send_message(Session, ListReq),
     Resp = decode(wait_send()),
     [Tool] = maps:get(<<"tools">>, maps:get(<<"result">>, Resp)),
     Ann = maps:get(<<"annotations">>, Tool),
@@ -218,7 +233,8 @@ tool_annotations_in_list(Config) ->
 
 tools_list_changed_notification(Config) ->
     Server = ?config(server, Config),
-    initialize(Server),
+    Session = ?config(session, Config),
+    initialize(Session),
     ok = erlmcp:add_tool(Server, #{
         name => <<"dynamic">>,
         description => <<"Added at runtime">>,
@@ -239,6 +255,7 @@ tools_list_changed_notification(Config) ->
 
 tools_list_paginated(Config) ->
     Server = ?config(server, Config),
+    Session = ?config(session, Config),
     lists:foreach(fun(N) ->
         Name = list_to_binary("tool_" ++ integer_to_list(N)),
         ok = erlmcp:add_tool(Server, #{
@@ -248,9 +265,9 @@ tools_list_paginated(Config) ->
             handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
         })
     end, lists:seq(1, 3)),
-    initialize(Server),
+    initialize(Session),
     ListReq = erlmcp_json_rpc:encode_request(2, <<"tools/list">>, #{}),
-    erlmcp_server_session:send_message(Server, ListReq),
+    erlmcp_server_session:send_message(Session, ListReq),
     Resp = decode(wait_send()),
     Result = maps:get(<<"result">>, Resp),
     Tools = maps:get(<<"tools">>, Result),
@@ -263,6 +280,7 @@ tools_list_paginated(Config) ->
 
 output_schema_structured_content(Config) ->
     Server = ?config(server, Config),
+    Session = ?config(session, Config),
     OutSchema = erlmcp_schema:object([
         erlmcp_schema:field(<<"sum">>, erlmcp_schema:number(), [required])
     ]),
@@ -280,12 +298,12 @@ output_schema_structured_content(Config) ->
                  #{<<"sum">> => Sum}}
         end
     }),
-    initialize(Server),
+    initialize(Session),
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
         <<"name">> => <<"add_structured">>,
         <<"arguments">> => #{<<"a">> => 3, <<"b">> => 4}
     }),
-    erlmcp_server_session:send_message(Server, CallReq),
+    erlmcp_server_session:send_message(Session, CallReq),
     Resp = decode(wait_send()),
     Result = maps:get(<<"result">>, Resp),
     ?assertMatch(#{<<"structuredContent">> := #{<<"sum">> := 7}}, Result),
@@ -293,6 +311,7 @@ output_schema_structured_content(Config) ->
 
 output_schema_violation_caught(Config) ->
     Server = ?config(server, Config),
+    Session = ?config(session, Config),
     OutSchema = erlmcp_schema:object([
         erlmcp_schema:field(<<"value">>, erlmcp_schema:string(), [required])
     ]),
@@ -305,12 +324,12 @@ output_schema_violation_caught(Config) ->
             {ok, erlmcp:text(<<"oops">>), #{<<"wrong_key">> => 42}}
         end
     }),
-    initialize(Server),
+    initialize(Session),
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
         <<"name">> => <<"bad_output">>,
         <<"arguments">> => #{}
     }),
-    erlmcp_server_session:send_message(Server, CallReq),
+    erlmcp_server_session:send_message(Session, CallReq),
     Resp = decode(wait_send()),
     ?assertMatch(#{<<"error">> := #{<<"code">> := -32603}}, Resp).
 
@@ -320,6 +339,7 @@ output_schema_violation_caught(Config) ->
 
 all_content_types(Config) ->
     Server = ?config(server, Config),
+    Session = ?config(session, Config),
     ok = erlmcp:add_tool(Server, #{
         name => <<"content_types">>,
         description => <<"Returns all content types">>,
@@ -335,12 +355,12 @@ all_content_types(Config) ->
             ]}
         end
     }),
-    initialize(Server),
+    initialize(Session),
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
         <<"name">> => <<"content_types">>,
         <<"arguments">> => #{}
     }),
-    erlmcp_server_session:send_message(Server, CallReq),
+    erlmcp_server_session:send_message(Session, CallReq),
     Resp = decode(wait_send()),
     Content = maps:get(<<"content">>, maps:get(<<"result">>, Resp)),
     ?assertEqual(5, length(Content)),
@@ -357,6 +377,7 @@ all_content_types(Config) ->
 
 progress_notification(Config) ->
     Server = ?config(server, Config),
+    Session = ?config(session, Config),
     ok = erlmcp:add_tool(Server, #{
         name => <<"slow">>,
         description => <<"Reports progress">>,
@@ -366,13 +387,13 @@ progress_notification(Config) ->
             {ok, erlmcp:text(<<"done">>)}
         end
     }),
-    initialize(Server),
+    initialize(Session),
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
         <<"name">> => <<"slow">>,
         <<"arguments">> => #{},
         <<"_meta">> => #{<<"progressToken">> => <<"tok1">>}
     }),
-    erlmcp_server_session:send_message(Server, CallReq),
+    erlmcp_server_session:send_message(Session, CallReq),
     ProgressNotif = decode(wait_send()),
     ?assertEqual(<<"notifications/progress">>,
                  maps:get(<<"method">>, ProgressNotif)),
@@ -388,32 +409,35 @@ progress_notification(Config) ->
 
 capability_reflects_tools(Config) ->
     Server = ?config(server, Config),
+    Session = ?config(session, Config),
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
-    erlmcp_server_session:send_message(Server, InitReq),
+    erlmcp_server_session:send_message(Session, InitReq),
     Resp1 = decode(wait_send()),
     Caps1 = maps:get(<<"capabilities">>, maps:get(<<"result">>, Resp1)),
     ?assertNot(maps:is_key(<<"tools">>, Caps1)),
-    gen_statem:stop(Server),
+    gen_statem:stop(Session),
+    gen_server:stop(Server),
 
-    {ok, Server2} = erlmcp_server_session:start_link(#{
-        transport => self(),
+    {ok, Srv2} = erlmcp_server:start_link(#{
         name => <<"test-server-2">>,
         version => <<"1.0">>,
-        capabilities => #{}
+        tools => [#{name => <<"t">>, description => <<"t">>,
+                    input_schema => erlmcp_schema:object([]),
+                    handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end}]
     }),
-    ok = erlmcp:add_tool(Server2, #{
-        name => <<"t">>,
-        description => <<"t">>,
-        input_schema => erlmcp_schema:object([]),
-        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    Responder2 = erlmcp_reply:new_device(self()),
+    {ok, Session2} = erlmcp_server_session:start_link(#{
+        server => Srv2, responder => Responder2,
+        name => <<"test-server-2">>, version => <<"1.0">>
     }),
-    erlmcp_server_session:send_message(Server2, InitReq),
+    erlmcp_server_session:send_message(Session2, InitReq),
     Resp2 = decode(wait_send()),
     Caps2 = maps:get(<<"capabilities">>, maps:get(<<"result">>, Resp2)),
     ?assert(maps:is_key(<<"tools">>, Caps2)),
     ToolsCap = maps:get(<<"tools">>, Caps2),
     ?assertEqual(true, maps:get(<<"listChanged">>, ToolsCap)),
-    gen_statem:stop(Server2).
+    gen_statem:stop(Session2),
+    gen_server:stop(Srv2).

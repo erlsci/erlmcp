@@ -19,27 +19,31 @@ all() ->
      batch_response_routes_to_out_pending].
 
 init_per_testcase(_TC, Config) ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => self(),
+    {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"m6b-test">>, version => <<"1.0">>,
-        capabilities => #{}
+        tools => [#{
+            name => <<"echo_meta">>,
+            description => <<"Echoes request _meta">>,
+            input_schema => erlmcp_schema:object([]),
+            icons => [#{<<"type">> => <<"url">>, <<"url">> => <<"https://example.com/icon.png">>}],
+            handler => fun(_Args, Ctx) ->
+                ReqMeta = erlmcp_ctx:meta(Ctx),
+                {ok, erlmcp:text(<<"got meta">>), #{<<"echo">> => true},
+                     ReqMeta}
+            end
+        }]
     }),
-    ok = erlmcp:add_tool(Server, #{
-        name => <<"echo_meta">>,
-        description => <<"Echoes request _meta">>,
-        input_schema => erlmcp_schema:object([]),
-        icons => [#{<<"type">> => <<"url">>, <<"url">> => <<"https://example.com/icon.png">>}],
-        handler => fun(_Args, Ctx) ->
-            ReqMeta = erlmcp_ctx:meta(Ctx),
-            {ok, erlmcp:text(<<"got meta">>), #{<<"echo">> => true},
-                 ReqMeta}
-        end
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"m6b-test">>, version => <<"1.0">>
     }),
-    initialize(Server),
-    [{server, Server} | Config].
+    initialize(Session),
+    [{server, Session}, {srv, Srv} | Config].
 
 end_per_testcase(_TC, Config) ->
     catch gen_statem:stop(?config(server, Config)),
+    catch gen_server:stop(?config(srv, Config)),
     ok.
 
 initialize(Server) ->
@@ -143,8 +147,9 @@ batch_malformed_member(Config) ->
 
 batch_response_routes_to_out_pending(Config) ->
     Server = ?config(server, Config),
+    Srv = ?config(srv, Config),
     TestPid = self(),
-    ok = erlmcp:add_tool(Server, #{
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"peer_call">>,
         description => <<"Calls request_peer and returns the result">>,
         input_schema => erlmcp_schema:object([]),

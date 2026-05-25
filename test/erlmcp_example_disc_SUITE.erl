@@ -18,31 +18,31 @@ end_per_testcase(_TC, _Config) ->
     ok.
 
 disc_calculator(_Config) ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        name => <<"calc-disc">>, version => <<"1.0">>, capabilities => #{}
+    {ok, Server} = erlmcp_server:start_link(#{
+        name => <<"calc-disc">>, version => <<"1.0">>,
+        handler => calculator_server
     }),
-    ok = erlmcp:register_handler(Server, calculator_server),
     ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
     ok = erlmcp:add_tool(Server, calculator_server:slow_tool_spec()),
     ok = erlmcp:add_tool(Server, calculator_server:explain_tool_spec()),
     check_disc_invariants(Server),
-    gen_statem:stop(Server).
+    gen_server:stop(Server).
 
 disc_simple(_Config) ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        name => <<"simple-disc">>, version => <<"1.0">>, capabilities => #{}
+    {ok, Server} = erlmcp_server:start_link(#{
+        name => <<"simple-disc">>, version => <<"1.0">>
     }),
     simple_server:register_all(Server),
     check_disc_invariants(Server),
-    gen_statem:stop(Server).
+    gen_server:stop(Server).
 
 disc_weather(_Config) ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        name => <<"weather-disc">>, version => <<"1.0">>, capabilities => #{}
+    {ok, Server} = erlmcp_server:start_link(#{
+        name => <<"weather-disc">>, version => <<"1.0">>
     }),
     weather_server:register_all(Server),
     check_disc_invariants(Server),
-    gen_statem:stop(Server).
+    gen_server:stop(Server).
 
 %%====================================================================
 %% Shared DISC-1/2/3 checks

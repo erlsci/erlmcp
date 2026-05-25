@@ -3,16 +3,16 @@
 -include_lib("eunit/include/eunit.hrl").
 
 new_and_accessors_test() ->
-    Ctx = erlmcp_ctx:new(#{session => self(), transport => self(), request_id => 42}),
+    Ctx = erlmcp_ctx:new(#{session => self(), request_id => 42}),
     ?assertEqual(self(), erlmcp_ctx:session(Ctx)),
-    ?assertEqual(self(), erlmcp_ctx:transport(Ctx)),
     ?assertEqual(42, erlmcp_ctx:request_id(Ctx)),
     ?assertEqual(undefined, erlmcp_ctx:progress_token(Ctx)),
-    ?assertEqual(#{}, erlmcp_ctx:meta(Ctx)).
+    ?assertEqual(#{}, erlmcp_ctx:meta(Ctx)),
+    ?assertEqual(undefined, erlmcp_ctx:server_ref(Ctx)).
 
-no_transport_test() ->
-    Ctx = erlmcp_ctx:new(#{session => self(), request_id => 1}),
-    ?assertEqual(undefined, erlmcp_ctx:transport(Ctx)).
+server_ref_test() ->
+    Ctx = erlmcp_ctx:new(#{session => self(), request_id => 1, server_ref => some_tab}),
+    ?assertEqual(some_tab, erlmcp_ctx:server_ref(Ctx)).
 
 report_progress_no_token_test() ->
     Ctx = erlmcp_ctx:new(#{session => self(), request_id => 1}),
@@ -33,3 +33,34 @@ report_progress_with_token_test() ->
     after 2000 ->
         ?assert(false)
     end.
+
+request_peer_timeout_test() ->
+    Ctx = erlmcp_ctx:new(#{session => self(), request_id => 1, peer_timeout => 50}),
+    Result = erlmcp_ctx:request_peer(Ctx, <<"sampling/createMessage">>, #{}),
+    ?assertEqual({error, timeout}, Result).
+
+request_peer_success_test() ->
+    Parent = self(),
+    SessionPid = spawn_link(fun() ->
+        receive
+            {peer_request, Caller, CallerRef, _Method, _Params} ->
+                Caller ! {peer_response, CallerRef, {ok, #{<<"done">> => true}}}
+        end,
+        Parent ! session_done
+    end),
+    Ctx = erlmcp_ctx:new(#{session => SessionPid, request_id => 1, peer_timeout => 2000}),
+    Result = erlmcp_ctx:request_peer(Ctx, <<"sampling/createMessage">>, #{<<"prompt">> => <<"hi">>}),
+    ?assertEqual({ok, #{<<"done">> => true}}, Result),
+    receive session_done -> ok after 1000 -> ok end.
+
+meta_test() ->
+    Ctx = erlmcp_ctx:new(#{session => self(), request_id => 1, meta => #{<<"k">> => <<"v">>}}),
+    ?assertEqual(#{<<"k">> => <<"v">>}, erlmcp_ctx:meta(Ctx)).
+
+peer_timeout_custom_test() ->
+    Ctx = erlmcp_ctx:new(#{session => self(), request_id => 1, peer_timeout => 5000}),
+    ?assertEqual(5000, erlmcp_ctx:peer_timeout(Ctx)).
+
+peer_timeout_default_test() ->
+    Ctx = erlmcp_ctx:new(#{session => self(), request_id => 1}),
+    ?assertEqual(30000, erlmcp_ctx:peer_timeout(Ctx)).

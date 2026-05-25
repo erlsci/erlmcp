@@ -41,23 +41,22 @@ end_per_suite(_Config) ->
     ok.
 
 init_per_testcase(_TC, Config) ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => self(),
-        name => <<"calculator-server">>,
-        version => <<"1.0">>,
-        capabilities => #{}
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"calculator-server">>, version => <<"1.0">>,
+        handler => example_calculator_handler
     }),
-    ok = erlmcp:register_handler(Server, example_calculator_handler),
-    ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
-    initialize(Server),
-    [{server, Server} | Config].
+    ok = erlmcp:add_tool(Srv, erlmcp:make_directory_tool()),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"calculator-server">>, version => <<"1.0">>
+    }),
+    initialize(Session),
+    [{server, Session}, {srv, Srv} | Config].
 
 end_per_testcase(_TC, Config) ->
-    Server = ?config(server, Config),
-    case is_process_alive(Server) of
-        true -> gen_statem:stop(Server);
-        false -> ok
-    end,
+    catch gen_statem:stop(?config(server, Config)),
+    catch gen_server:stop(?config(srv, Config)),
     ok.
 
 %%====================================================================
@@ -143,7 +142,8 @@ annotations_present(Config) ->
 
 list_changed_on_add_remove(Config) ->
     Server = ?config(server, Config),
-    ok = erlmcp:add_tool(Server, #{
+    Srv = ?config(srv, Config),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"temp">>,
         description => <<"Temporary tool">>,
         input_schema => erlmcp_schema:object([]),
@@ -154,14 +154,15 @@ list_changed_on_add_remove(Config) ->
     Notif1 = decode(wait_send()),
     ?assertEqual(<<"notifications/tools/list_changed">>,
                  maps:get(<<"method">>, Notif1)),
-    ok = erlmcp:remove_tool(Server, <<"temp">>),
+    ok = erlmcp:remove_tool(Srv, <<"temp">>),
     Notif2 = decode(wait_send()),
     ?assertEqual(<<"notifications/tools/list_changed">>,
                  maps:get(<<"method">>, Notif2)).
 
 progress_reporting(Config) ->
     Server = ?config(server, Config),
-    ok = erlmcp:add_tool(Server, #{
+    Srv = ?config(srv, Config),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"slow_add">>,
         description => <<"Slow addition with progress">>,
         input_schema => erlmcp_schema:object([

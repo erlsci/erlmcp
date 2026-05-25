@@ -11,18 +11,21 @@ all() ->
     [start_stop, get_weather_tool, read_resource, read_template, get_prompt].
 
 init_per_testcase(_TC, Config) ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => self(),
-        name => <<"weather-smoke">>,
-        version => <<"1.0">>,
-        capabilities => #{}
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"weather-smoke">>, version => <<"1.0">>
     }),
-    weather_server:register_all(Server),
-    initialize(Server),
-    [{server, Server} | Config].
+    weather_server:register_all(Srv),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"weather-smoke">>, version => <<"1.0">>
+    }),
+    initialize(Session),
+    [{server, Session}, {srv, Srv} | Config].
 
 end_per_testcase(_TC, Config) ->
     catch gen_statem:stop(?config(server, Config)),
+    catch gen_server:stop(?config(srv, Config)),
     ok.
 
 start_stop(Config) ->

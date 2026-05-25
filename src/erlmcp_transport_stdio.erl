@@ -17,7 +17,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -record(state, {
-    transport_id :: erlmcp_transport:transport_id(),
+    transport_id :: atom(),
     session :: pid() | undefined,
     reader :: pid() | undefined
 }).
@@ -38,7 +38,7 @@ close(Pid) when is_pid(Pid) ->
 %% API
 %%====================================================================
 
--spec start_link(erlmcp_transport:transport_id(), erlmcp_transport:config()) ->
+-spec start_link(atom(), erlmcp_transport:config()) ->
     {ok, pid()} | {error, term()}.
 start_link(TransportId, Config) when is_atom(TransportId), is_map(Config) ->
     gen_server:start_link(?MODULE, {TransportId, Config}, []).

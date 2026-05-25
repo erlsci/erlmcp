@@ -26,25 +26,31 @@ init_per_testcase(_TestCase, Config) ->
     Self = self(),
     ServerTransport = spawn_link(fun() -> transport(Self) end),
     ClientTransport = spawn_link(fun() -> transport(Self) end),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => ServerTransport,
+    {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"ct-server">>,
         version => <<"1.0">>,
         capabilities => #{<<"tools">> => #{}},
         handlers => #{<<"slow">> => fun slow_handler/2}
     }),
+    Responder = erlmcp_reply:new_device(ServerTransport),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"ct-server">>, version => <<"1.0">>
+    }),
     {ok, Client} = erlmcp_client_session:start_link(#{
         transport => ClientTransport
     }),
-    [{server, Server}, {client, Client},
+    [{server, Server}, {srv, Srv}, {client, Client},
      {server_transport, ServerTransport},
      {client_transport, ClientTransport} | Config].
 
 end_per_testcase(_TestCase, Config) ->
     Server = ?config(server, Config),
+    Srv = ?config(srv, Config),
     Client = ?config(client, Config),
     catch gen_statem:stop(Client),
     catch gen_statem:stop(Server),
+    catch gen_server:stop(Srv),
     ok.
 
 %%====================================================================

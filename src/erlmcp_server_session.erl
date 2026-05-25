@@ -4,39 +4,26 @@
 
 -include_lib("kernel/include/logger.hrl").
 
-%% M1 API
--export([start_link/1, send_message/2, set_transport/2, get_instructions/1]).
-%% Tools (M2a)
--export([register_tool/2, unregister_tool/2, list_tools/1,
-         register_handler/2]).
-%% Resources (M2b)
--export([register_resource/2, unregister_resource/2, list_resources/1,
-         register_resource_template/2, unregister_resource_template/2,
-         list_resource_templates/1,
-         notify_resource_updated/2]).
-%% Prompts (M2b)
--export([register_prompt/2, unregister_prompt/2, list_prompts/1]).
+%% API
+-export([start_link/1, send_message/2, send_message/3, get_instructions/1]).
 %% Logging (M2b)
 -export([set_log_level/2, emit_log/4]).
 %% gen_statem
 -export([callback_mode/0, init/1, terminate/3]).
--export([uninitialized/3, initializing/3, operational/3, shutting_down/3]).
+-export([uninitialized/3, operational/3, shutting_down/3]).
 
 -record(data, {
-    transport :: pid() | undefined,
+    server_ref :: ets:tid(),
+    server_pid :: pid() | undefined,
+    responder :: erlmcp_reply:responder() | undefined,
     server_info :: erlmcp_model:peer_info(),
     capabilities :: map(),
     protocol_version :: binary() | undefined,
     next_id = 1 :: pos_integer(),
-    pending = #{} :: #{pos_integer() => {pid(), reference()}},
-    handlers :: map(),
-    tools = #{} :: #{binary() => map()},
+    pending = #{} :: #{pos_integer() => {pid(), reference(), erlmcp_reply:responder()}},
     tasks = #{} :: #{binary() => pid()},
     out_pending = #{} :: #{pos_integer() => {pid(), reference()}},
     out_next_id = 1 :: pos_integer(),
-    resources = #{} :: #{binary() => map()},
-    resource_templates = #{} :: #{binary() => map()},
-    prompts = #{} :: #{binary() => map()},
     subscriptions = #{} :: #{binary() => true},
     log_level = emergency :: atom(),
     instructions :: binary() | undefined
@@ -56,69 +43,13 @@ start_link(Opts) when is_map(Opts) ->
 send_message(Session, Data) when is_pid(Session), is_binary(Data) ->
     gen_statem:cast(Session, {transport_data, Data}).
 
--spec set_transport(pid(), pid()) -> ok.
-set_transport(Session, Transport) when is_pid(Session), is_pid(Transport) ->
-    gen_statem:call(Session, {set_transport, Transport}).
-
--spec register_tool(pid(), map()) -> ok | {error, term()}.
-register_tool(Session, ToolSpec) when is_pid(Session), is_map(ToolSpec) ->
-    gen_statem:call(Session, {register_tool, ToolSpec}).
-
--spec unregister_tool(pid(), binary()) -> ok.
-unregister_tool(Session, ToolName) when is_pid(Session), is_binary(ToolName) ->
-    gen_statem:call(Session, {unregister_tool, ToolName}).
-
--spec list_tools(pid()) -> [map()].
-list_tools(Session) when is_pid(Session) ->
-    gen_statem:call(Session, list_tools).
-
--spec register_handler(pid(), module()) -> ok.
-register_handler(Session, Module) when is_pid(Session), is_atom(Module) ->
-    gen_statem:call(Session, {register_handler, Module}).
+-spec send_message(pid(), binary(), erlmcp_reply:responder()) -> ok.
+send_message(Session, Data, Responder) when is_pid(Session), is_binary(Data) ->
+    gen_statem:cast(Session, {transport_data, Data, Responder}).
 
 -spec get_instructions(pid()) -> binary() | undefined.
 get_instructions(Session) when is_pid(Session) ->
     gen_statem:call(Session, get_instructions).
-
--spec register_resource(pid(), map()) -> ok.
-register_resource(Session, Spec) when is_pid(Session), is_map(Spec) ->
-    gen_statem:call(Session, {register_resource, Spec}).
-
--spec unregister_resource(pid(), binary()) -> ok.
-unregister_resource(Session, Uri) when is_pid(Session), is_binary(Uri) ->
-    gen_statem:call(Session, {unregister_resource, Uri}).
-
--spec list_resources(pid()) -> [map()].
-list_resources(Session) when is_pid(Session) ->
-    gen_statem:call(Session, list_resources).
-
--spec register_resource_template(pid(), map()) -> ok.
-register_resource_template(Session, Spec) when is_pid(Session), is_map(Spec) ->
-    gen_statem:call(Session, {register_resource_template, Spec}).
-
--spec unregister_resource_template(pid(), binary()) -> ok.
-unregister_resource_template(Session, UriTemplate) when is_pid(Session), is_binary(UriTemplate) ->
-    gen_statem:call(Session, {unregister_resource_template, UriTemplate}).
-
--spec list_resource_templates(pid()) -> [map()].
-list_resource_templates(Session) when is_pid(Session) ->
-    gen_statem:call(Session, list_resource_templates).
-
--spec notify_resource_updated(pid(), binary()) -> ok.
-notify_resource_updated(Session, Uri) when is_pid(Session), is_binary(Uri) ->
-    gen_statem:cast(Session, {resource_updated, Uri}).
-
--spec register_prompt(pid(), map()) -> ok.
-register_prompt(Session, Spec) when is_pid(Session), is_map(Spec) ->
-    gen_statem:call(Session, {register_prompt, Spec}).
-
--spec unregister_prompt(pid(), binary()) -> ok.
-unregister_prompt(Session, Name) when is_pid(Session), is_binary(Name) ->
-    gen_statem:call(Session, {unregister_prompt, Name}).
-
--spec list_prompts(pid()) -> [map()].
-list_prompts(Session) when is_pid(Session) ->
-    gen_statem:call(Session, list_prompts).
 
 -spec set_log_level(pid(), atom()) -> ok.
 set_log_level(Session, Level) when is_pid(Session), is_atom(Level) ->
@@ -138,16 +69,25 @@ callback_mode() ->
 -spec init(map()) -> gen_statem:init_result(atom()).
 init(Opts) ->
     process_flag(trap_exit, true),
-    Transport = maps:get(transport, Opts, undefined),
+    ServerPid = maps:get(server, Opts, undefined),
+    Tab = case ServerPid of
+        undefined -> undefined;
+        Pid -> erlmcp_server:catalog_table(Pid)
+    end,
+    case ServerPid of
+        undefined -> ok;
+        _ -> erlmcp_server:register_session(ServerPid, self())
+    end,
+    Responder = maps:get(responder, Opts, undefined),
     ServerName = maps:get(name, Opts, <<"erlmcp">>),
     ServerVersion = maps:get(version, Opts, <<"0.6.0">>),
     Caps = maps:get(capabilities, Opts, #{}),
-    Handlers = maps:get(handlers, Opts, #{}),
     Data = #data{
-        transport = Transport,
+        server_ref = Tab,
+        server_pid = ServerPid,
+        responder = Responder,
         server_info = erlmcp_model:make_server_info(ServerName, ServerVersion),
-        capabilities = Caps,
-        handlers = Handlers
+        capabilities = Caps
     },
     {ok, uninitialized, Data}.
 
@@ -156,27 +96,18 @@ init(Opts) ->
 %%====================================================================
 
 uninitialized(cast, {transport_data, RawData}, Data) ->
-    handle_uninitialized_data(RawData, Data);
+    handle_uninitialized_data(RawData, Data, Data#data.responder);
+uninitialized(cast, {transport_data, RawData, Responder}, Data) ->
+    handle_uninitialized_data(RawData, Data, Responder);
 uninitialized(info, {transport_data, RawData}, Data) ->
-    handle_uninitialized_data(RawData, Data);
+    handle_uninitialized_data(RawData, Data, Data#data.responder);
+uninitialized(info, {transport_data, RawData, Responder}, Data) ->
+    handle_uninitialized_data(RawData, Data, Responder);
+uninitialized(info, {catalog_changed, _Method}, _Data) ->
+    keep_state_and_data;
 uninitialized({call, From}, Msg, Data) ->
     handle_common_call(From, Msg, uninitialized, Data);
 uninitialized(_EventType, _Event, _Data) ->
-    keep_state_and_data.
-
-%%====================================================================
-%% State: initializing
-%%====================================================================
-
-initializing(cast, {transport_data, RawData}, _Data) ->
-    ?LOG_DEBUG("session(initializing): dropping transport_data (cast) ~p", [RawData]),
-    keep_state_and_data;
-initializing(info, {transport_data, RawData}, _Data) ->
-    ?LOG_DEBUG("session(initializing): dropping transport_data (info) ~p", [RawData]),
-    keep_state_and_data;
-initializing({call, From}, Msg, Data) ->
-    handle_common_call(From, Msg, initializing, Data);
-initializing(_EventType, _Event, _Data) ->
     keep_state_and_data.
 
 %%====================================================================
@@ -184,9 +115,13 @@ initializing(_EventType, _Event, _Data) ->
 %%====================================================================
 
 operational(cast, {transport_data, RawData}, Data) ->
-    handle_operational_data(RawData, Data);
+    handle_operational_data(RawData, Data, Data#data.responder);
+operational(cast, {transport_data, RawData, Responder}, Data) ->
+    handle_operational_data(RawData, Data, Responder);
 operational(info, {transport_data, RawData}, Data) ->
-    handle_operational_data(RawData, Data);
+    handle_operational_data(RawData, Data, Data#data.responder);
+operational(info, {transport_data, RawData, Responder}, Data) ->
+    handle_operational_data(RawData, Data, Responder);
 operational(cast, {resource_updated, Uri}, Data) ->
     handle_resource_updated_cast(Uri, Data);
 operational(cast, {emit_log, Level, Logger, LogData}, Data) ->
@@ -196,10 +131,17 @@ operational(info, {worker_result, Id, Result}, Data) ->
 operational(info, {'DOWN', Ref, process, Pid, Reason}, Data) ->
     handle_worker_down(Pid, Ref, Reason, Data);
 operational(info, {send_notification, _ReqId, Notification}, Data) ->
-    send_raw(Data, Notification),
+    send_raw(Data#data.responder, Notification),
     keep_state_and_data;
 operational(info, {peer_request, Caller, CallerRef, Method, Params}, Data) ->
     handle_peer_request(Caller, CallerRef, Method, Params, Data);
+operational(info, {catalog_changed, Method}, Data) ->
+    case Data#data.protocol_version of
+        undefined -> ok;
+        _ -> send_raw(Data#data.responder,
+                      erlmcp_json_rpc:encode_notification(Method, #{}))
+    end,
+    keep_state_and_data;
 operational({call, From}, Msg, Data) ->
     handle_common_call(From, Msg, operational, Data);
 operational(EventType, Event, _Data) ->
@@ -217,7 +159,11 @@ shutting_down(_EventType, _Event, _Data) ->
     keep_state_and_data.
 
 -spec terminate(term(), atom(), #data{}) -> ok.
-terminate(_Reason, _State, _Data) ->
+terminate(_Reason, _State, #data{server_pid = ServerPid}) ->
+    case ServerPid of
+        undefined -> ok;
+        Pid -> catch erlmcp_server:unregister_session(Pid, self())
+    end,
     ok.
 
 %%====================================================================
@@ -226,79 +172,42 @@ terminate(_Reason, _State, _Data) ->
 
 handle_common_call(From, get_state, State, _Data) ->
     {keep_state_and_data, [{reply, From, State}]};
-handle_common_call(From, {set_transport, Transport}, _State, Data) ->
-    {keep_state, Data#data{transport = Transport}, [{reply, From, ok}]};
-%% Tools
-handle_common_call(From, {register_tool, ToolSpec}, _State, Data) ->
-    do_register_tool(From, ToolSpec, Data);
-handle_common_call(From, {unregister_tool, ToolName}, _State, Data) ->
-    do_unregister_tool(From, ToolName, Data);
-handle_common_call(From, list_tools, _State, Data) ->
-    {keep_state_and_data, [{reply, From, maps:values(Data#data.tools)}]};
-handle_common_call(From, {register_handler, Module}, _State, Data) ->
-    do_register_handler(From, Module, Data);
 handle_common_call(From, get_instructions, _State, Data) ->
     {keep_state_and_data, [{reply, From, Data#data.instructions}]};
-%% Resources
-handle_common_call(From, {register_resource, Spec}, _State, Data) ->
-    do_register_resource(From, Spec, Data);
-handle_common_call(From, {unregister_resource, Uri}, _State, Data) ->
-    do_unregister_resource(From, Uri, Data);
-handle_common_call(From, list_resources, _State, Data) ->
-    {keep_state_and_data, [{reply, From, maps:values(Data#data.resources)}]};
-handle_common_call(From, {register_resource_template, Spec}, _State, Data) ->
-    do_register_resource_template(From, Spec, Data);
-handle_common_call(From, {unregister_resource_template, UriT}, _State, Data) ->
-    do_unregister_resource_template(From, UriT, Data);
-handle_common_call(From, list_resource_templates, _State, Data) ->
-    {keep_state_and_data, [{reply, From, maps:values(Data#data.resource_templates)}]};
-%% Prompts
-handle_common_call(From, {register_prompt, Spec}, _State, Data) ->
-    do_register_prompt(From, Spec, Data);
-handle_common_call(From, {unregister_prompt, Name}, _State, Data) ->
-    do_unregister_prompt(From, Name, Data);
-handle_common_call(From, list_prompts, _State, Data) ->
-    {keep_state_and_data, [{reply, From, maps:values(Data#data.prompts)}]};
-%% Logging
 handle_common_call(From, {set_log_level, Level}, _State, Data) ->
     {keep_state, Data#data{log_level = Level}, [{reply, From, ok}]};
-%% Catch-all
 handle_common_call(From, _Msg, _State, _Data) ->
     {keep_state_and_data, [{reply, From, {error, unknown_request}}]}.
 
 %%====================================================================
-%% Transport data dispatch (cast or info — both accepted)
+%% Transport data dispatch
 %%====================================================================
 
-handle_uninitialized_data(RawData, Data) ->
+handle_uninitialized_data(RawData, Data, Responder) ->
     case erlmcp_json_rpc:decode_and_classify(RawData) of
         {ok, Classified} ->
-            handle_uninitialized_message(Classified, Data);
+            handle_uninitialized_message(Classified, Data, Responder);
         {error, _Reason} ->
-            send_error(Data, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
+            send_error(Responder, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
             keep_state_and_data
     end.
 
-handle_operational_data(RawData, Data) ->
+handle_operational_data(RawData, Data, Responder) ->
     ?LOG_DEBUG("session(operational): raw input ~p", [RawData]),
     case erlmcp_json_rpc:decode_and_classify_any(RawData) of
         {ok, {batch, Items}} ->
             ?LOG_DEBUG("session(operational): batch of ~p items", [length(Items)]),
-            handle_batch(Items, Data);
+            handle_batch(Items, Data, Responder);
         {ok, Classified} ->
             ?LOG_DEBUG("session(operational): classified ~p", [Classified]),
-            handle_operational_message(Classified, Data);
+            handle_operational_message(Classified, Data, Responder);
         {error, Reason} ->
             ?LOG_DEBUG("session(operational): parse error ~p", [Reason]),
-            send_error(Data, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
+            send_error(Responder, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
             keep_state_and_data
     end.
 
-%% Batch dispatch is intentionally synchronous and limited to intrinsic
-%% fast methods (ping, tools/list). All other methods return method_not_found.
-%% Do NOT extend dispatch_batch_request to handler-backed methods without
-%% adding per-member worker dispatch — that would block the FSM.
-handle_batch(Items, Data) ->
+handle_batch(Items, Data, Responder) ->
     {Responses, NewData} = lists:foldl(fun(Item, {RespAcc, DAcc}) ->
         case Item of
             {notification, _, _} ->
@@ -321,99 +230,102 @@ handle_batch(Items, Data) ->
         [] -> {keep_state, NewData};
         _ ->
             BatchJson = erlmcp_json_rpc:encode_batch(lists:reverse(Responses)),
-            send_raw(NewData, BatchJson),
+            send_raw(Responder, BatchJson),
             {keep_state, NewData}
     end.
 
 dispatch_batch_request(Id, <<"ping">>, _Params, _Data) ->
     erlmcp_json_rpc:encode_response(Id, #{});
 dispatch_batch_request(Id, <<"tools/list">>, _Params, Data) ->
-    ToolList = [format_tool_for_list(T) || T <- maps:values(Data#data.tools)],
+    Tools = erlmcp_server:get_tools(Data#data.server_ref),
+    ToolList = [format_tool_for_list(T) || T <- maps:values(Tools)],
     erlmcp_json_rpc:encode_response(Id, #{<<"tools">> => ToolList});
-dispatch_batch_request(Id, Method, _Params, _Data) ->
-    erlmcp_json_rpc:encode_error_response(
-        Id, erlmcp_json_rpc:method_not_found(),
-        <<"Batch dispatch: ", Method/binary>>).
+dispatch_batch_request(Id, _Method, _Params, _Data) ->
+    erlmcp_json_rpc:encode_error_response(Id, erlmcp_json_rpc:method_not_found(),
+                                          <<"Method not found">>).
 
 %%====================================================================
-%% Message handling — uninitialized
+%% Message dispatch — uninitialized
 %%====================================================================
 
-handle_uninitialized_message({request, Id, <<"initialize">>, Params}, Data) ->
-    handle_initialize(Id, Params, Data);
-handle_uninitialized_message({request, Id, _Method, _Params}, Data) ->
-    send_error(Data, Id, erlmcp_json_rpc:invalid_request(), <<"Server not initialized">>),
+handle_uninitialized_message({request, Id, <<"initialize">>, Params}, Data, Responder) ->
+    handle_initialize(Id, Params, Data, Responder);
+handle_uninitialized_message({request, Id, <<"ping">>, _Params}, Data, Responder) ->
+    handle_ping(Id, Data, Responder);
+handle_uninitialized_message({request, Id, _, _}, Data, Responder) ->
+    send_error(Responder, Id, erlmcp_json_rpc:invalid_request(), <<"Server not initialized">>),
+    {keep_state, Data};
+handle_uninitialized_message({notification, _, _}, _Data, _Responder) ->
     keep_state_and_data;
-handle_uninitialized_message(_, _Data) ->
+handle_uninitialized_message(_, _Data, _Responder) ->
     keep_state_and_data.
 
 %%====================================================================
-%% Message handling — operational
+%% Message dispatch — operational
 %%====================================================================
 
-handle_operational_message({request, Id, <<"ping">>, _Params}, Data) ->
-    handle_ping(Id, Data);
-%% Tools
-handle_operational_message({request, Id, <<"tools/list">>, Params}, Data) ->
-    handle_tools_list(Id, Params, Data);
-handle_operational_message({request, Id, <<"tools/call">>, Params}, Data) ->
-    handle_tools_call(Id, Params, Data);
-%% Resources
-handle_operational_message({request, Id, <<"resources/list">>, Params}, Data) ->
-    handle_resources_list(Id, Params, Data);
-handle_operational_message({request, Id, <<"resources/read">>, Params}, Data) ->
-    handle_resources_read(Id, Params, Data);
-handle_operational_message({request, Id, <<"resources/templates/list">>, Params}, Data) ->
-    handle_resource_templates_list(Id, Params, Data);
-handle_operational_message({request, Id, <<"resources/subscribe">>, Params}, Data) ->
-    handle_resources_subscribe(Id, Params, Data);
-handle_operational_message({request, Id, <<"resources/unsubscribe">>, Params}, Data) ->
-    handle_resources_unsubscribe(Id, Params, Data);
-%% Prompts
-handle_operational_message({request, Id, <<"prompts/list">>, Params}, Data) ->
-    handle_prompts_list(Id, Params, Data);
-handle_operational_message({request, Id, <<"prompts/get">>, Params}, Data) ->
-    handle_prompts_get(Id, Params, Data);
-%% Logging
-handle_operational_message({request, Id, <<"logging/setLevel">>, Params}, Data) ->
-    handle_logging_set_level(Id, Params, Data);
+handle_operational_message({request, Id, <<"initialize">>, Params}, Data, Responder) ->
+    handle_initialize(Id, Params, Data, Responder);
+handle_operational_message({request, Id, <<"ping">>, _Params}, Data, Responder) ->
+    handle_ping(Id, Data, Responder);
+handle_operational_message({request, Id, <<"tools/list">>, Params}, Data, Responder) ->
+    handle_tools_list(Id, Params, Data, Responder);
+handle_operational_message({request, Id, <<"tools/call">>, Params}, Data, Responder) ->
+    handle_tools_call(Id, Params, Data, Responder);
+handle_operational_message({request, Id, <<"resources/list">>, Params}, Data, Responder) ->
+    handle_resources_list(Id, Params, Data, Responder);
+handle_operational_message({request, Id, <<"resources/read">>, Params}, Data, Responder) ->
+    handle_resources_read(Id, Params, Data, Responder);
+handle_operational_message({request, Id, <<"resources/templates/list">>, Params}, Data, Responder) ->
+    handle_resource_templates_list(Id, Params, Data, Responder);
+handle_operational_message({request, Id, <<"resources/subscribe">>, Params}, Data, Responder) ->
+    handle_resources_subscribe(Id, Params, Data, Responder);
+handle_operational_message({request, Id, <<"resources/unsubscribe">>, Params}, Data, Responder) ->
+    handle_resources_unsubscribe(Id, Params, Data, Responder);
+handle_operational_message({request, Id, <<"prompts/list">>, Params}, Data, Responder) ->
+    handle_prompts_list(Id, Params, Data, Responder);
+handle_operational_message({request, Id, <<"prompts/get">>, Params}, Data, Responder) ->
+    handle_prompts_get(Id, Params, Data, Responder);
+handle_operational_message({request, Id, <<"logging/setLevel">>, Params}, Data, Responder) ->
+    handle_logging_set_level(Id, Params, Data, Responder);
 %% Completion
-handle_operational_message({request, Id, <<"completion/complete">>, Params}, Data) ->
-    handle_completion_complete(Id, Params, Data);
+handle_operational_message({request, Id, <<"completion/complete">>, Params}, Data, Responder) ->
+    handle_completion_complete(Id, Params, Data, Responder);
 %% Tasks
-handle_operational_message({request, Id, <<"tasks/get">>, Params}, Data) ->
-    handle_tasks_get(Id, Params, Data);
-handle_operational_message({request, Id, <<"tasks/list">>, _Params}, Data) ->
-    handle_tasks_list(Id, Data);
-handle_operational_message({request, Id, <<"tasks/result">>, Params}, Data) ->
-    handle_tasks_result(Id, Params, Data);
-handle_operational_message({request, Id, <<"tasks/cancel">>, Params}, Data) ->
-    handle_tasks_cancel(Id, Params, Data);
+handle_operational_message({request, Id, <<"tasks/get">>, Params}, Data, Responder) ->
+    handle_tasks_get(Id, Params, Data, Responder);
+handle_operational_message({request, Id, <<"tasks/list">>, _Params}, Data, Responder) ->
+    handle_tasks_list(Id, Data, Responder);
+handle_operational_message({request, Id, <<"tasks/result">>, Params}, Data, Responder) ->
+    handle_tasks_result(Id, Params, Data, Responder);
+handle_operational_message({request, Id, <<"tasks/cancel">>, Params}, Data, Responder) ->
+    handle_tasks_cancel(Id, Params, Data, Responder);
 %% Outbound response (client responding to server-initiated request)
-handle_operational_message({response, Id, Result}, Data) ->
+handle_operational_message({response, Id, Result}, Data, _Responder) ->
     handle_outbound_response(Id, {ok, Result}, Data);
-handle_operational_message({error_response, Id, Error}, Data) ->
+handle_operational_message({error_response, Id, Error}, Data, _Responder) ->
     handle_outbound_response(Id, {error, Error}, Data);
 %% Generic / notifications
-handle_operational_message({request, Id, Method, Params}, Data) ->
-    handle_request(Id, Method, Params, Data);
-handle_operational_message({notification, <<"notifications/cancelled">>, Params}, Data) ->
+handle_operational_message({request, Id, Method, Params}, Data, Responder) ->
+    handle_request(Id, Method, Params, Data, Responder);
+handle_operational_message({notification, <<"notifications/cancelled">>, Params}, Data, _Responder) ->
     handle_cancelled(Params, Data);
-handle_operational_message({notification, <<"notifications/initialized">>, _Params}, _Data) ->
+handle_operational_message({notification, <<"notifications/initialized">>, _Params}, _Data, _Responder) ->
     keep_state_and_data;
-handle_operational_message(_, _Data) ->
+handle_operational_message(_, _Data, _Responder) ->
     keep_state_and_data.
 
 %%====================================================================
 %% Protocol handlers — initialize, ping
 %%====================================================================
 
-handle_initialize(Id, Params, Data) ->
+handle_initialize(Id, Params, Data, Responder) ->
     ClientVersion = maps:get(<<"protocolVersion">>, Params, undefined),
     case erlmcp_capabilities:negotiate_version(
              ClientVersion, erlmcp_capabilities:supported_versions()) of
         {ok, Version} ->
-            Instructions = erlmcp_instructions:generate(maps:values(Data#data.tools)),
+            Tools = erlmcp_server:get_tools(Data#data.server_ref),
+            Instructions = erlmcp_instructions:generate(maps:values(Tools)),
             ServerCaps = erlmcp_capabilities:build_server_capabilities(
                              derive_capabilities(Data)),
             Result = #{
@@ -425,40 +337,39 @@ handle_initialize(Id, Params, Data) ->
                 },
                 <<"instructions">> => Instructions
             },
-            send_response(Data, Id, Result),
+            send_response(Responder, Id, Result),
             NewData = Data#data{protocol_version = Version,
                                 instructions = Instructions},
             {next_state, operational, NewData};
         {error, no_common_version} ->
-            send_error(Data, Id, erlmcp_json_rpc:invalid_params(),
+            send_error(Responder, Id, erlmcp_json_rpc:invalid_params(),
                        <<"Unsupported protocol version">>),
             keep_state_and_data
     end.
 
-handle_ping(Id, Data) ->
-    send_response(Data, Id, #{}),
+handle_ping(Id, _Data, Responder) ->
+    send_response(Responder, Id, #{}),
     keep_state_and_data.
 
-handle_request(Id, Method, Params, Data) ->
+handle_request(Id, Method, Params, Data, Responder) ->
     Session = self(),
-    Transport = Data#data.transport,
-    Handlers = Data#data.handlers,
+    Handlers = erlmcp_server:get_handlers(Data#data.server_ref),
     Ctx = erlmcp_ctx:new(#{
         session => Session,
-        transport => Transport,
-        request_id => Id
+        request_id => Id,
+        server_ref => Data#data.server_ref
     }),
     {Pid, Ref} = spawn_monitor(fun() ->
         Result = dispatch_request(Method, Params, Handlers, Ctx),
         _ = Session ! {worker_result, Id, Result}
     end),
-    NewPending = maps:put(Id, {Pid, Ref}, Data#data.pending),
+    NewPending = maps:put(Id, {Pid, Ref, Responder}, Data#data.pending),
     {keep_state, Data#data{pending = NewPending}}.
 
 handle_cancelled(Params, Data) ->
     RequestId = maps:get(<<"requestId">>, Params, undefined),
     case maps:take(RequestId, Data#data.pending) of
-        {{Pid, Ref}, NewPending} ->
+        {{Pid, Ref, _ReplyTo}, NewPending} ->
             demonitor(Ref, [flush]),
             exit(Pid, cancelled),
             {keep_state, Data#data{pending = NewPending}};
@@ -470,32 +381,33 @@ handle_cancelled(Params, Data) ->
 %% Tools — list & call (M2a)
 %%====================================================================
 
-handle_tools_list(Id, Params, Data) ->
+handle_tools_list(Id, Params, Data, Responder) ->
+    Tools = erlmcp_server:get_tools(Data#data.server_ref),
     Sorted = lists:sort(fun(A, B) ->
         maps:get(name, A) =< maps:get(name, B)
-    end, maps:values(Data#data.tools)),
+    end, maps:values(Tools)),
     Cursor = maps:get(<<"cursor">>, Params, undefined),
     {PageTools, NextCursor} = erlmcp_pagination:paginate(Sorted, Cursor),
     ToolList = [format_tool_for_list(T) || T <- PageTools],
     Result = erlmcp_pagination:paginated_result(<<"tools">>, ToolList, NextCursor),
-    send_response(Data, Id, Result),
+    send_response(Responder, Id, Result),
     keep_state_and_data.
 
-handle_tools_call(Id, Params, Data) ->
+handle_tools_call(Id, Params, Data, Responder) ->
     case maps:get(<<"name">>, Params, undefined) of
         undefined ->
-            send_error(Data, Id, erlmcp_json_rpc:invalid_params(),
+            send_error(Responder, Id, erlmcp_json_rpc:invalid_params(),
                        <<"Missing tool name">>),
             keep_state_and_data;
         ToolName ->
             Args = maps:get(<<"arguments">>, Params, #{}),
             Meta = maps:get(<<"_meta">>, Params, #{}),
-            case maps:get(ToolName, Data#data.tools, undefined) of
-                undefined ->
-                    send_error(Data, Id, erlmcp_json_rpc:invalid_params(),
+            case erlmcp_server:get_tool(Data#data.server_ref, ToolName) of
+                error ->
+                    send_error(Responder, Id, erlmcp_json_rpc:invalid_params(),
                                <<"Unknown tool">>),
                     keep_state_and_data;
-                ToolSpec ->
+                {ok, ToolSpec} ->
                     case validate_tool_input(ToolSpec, Args) of
                         ok ->
                             TaskSupport = maps:get(task_support, ToolSpec, forbidden),
@@ -504,15 +416,15 @@ handle_tools_call(Id, Params, Data) ->
                                 true ->
                                     {TaskId, NewData} = start_task(
                                         ToolName, Args, ToolSpec, Meta, Data),
-                                    send_response(Data, Id,
+                                    send_response(Responder, Id,
                                         #{<<"taskId">> => TaskId}),
                                     {keep_state, NewData};
                                 false ->
                                     dispatch_tool_call(
-                                        Id, ToolName, Args, ToolSpec, Meta, Data)
+                                        Id, ToolName, Args, ToolSpec, Meta, Data, Responder)
                             end;
                         {error, _} ->
-                            send_error(Data, Id, erlmcp_json_rpc:invalid_params(),
+                            send_error(Responder, Id, erlmcp_json_rpc:invalid_params(),
                                        <<"Invalid tool arguments">>),
                             keep_state_and_data
                     end
@@ -525,12 +437,12 @@ validate_tool_input(ToolSpec, Args) ->
         Schema -> erlmcp_schema:validate(Schema, Args)
     end.
 
-dispatch_tool_call(Id, ToolName, Args, ToolSpec, Meta, Data) ->
+dispatch_tool_call(Id, ToolName, Args, ToolSpec, Meta, Data, Responder) ->
     Session = self(),
-    Transport = Data#data.transport,
     ProgressToken = maps:get(<<"progressToken">>, Meta, undefined),
     RequestMeta = maps:without([<<"progressToken">>, <<"_task">>], Meta),
-    CtxOpts = #{session => Session, transport => Transport, request_id => Id},
+    CtxOpts = #{session => Session, request_id => Id,
+                 server_ref => Data#data.server_ref},
     CtxOpts1 = case ProgressToken of
         undefined -> CtxOpts;
         _ -> CtxOpts#{progress_token => ProgressToken}
@@ -546,7 +458,7 @@ dispatch_tool_call(Id, ToolName, Args, ToolSpec, Meta, Data) ->
         Result = validate_tool_output(ToolSpec, Formatted),
         _ = Session ! {worker_result, Id, Result}
     end),
-    NewPending = maps:put(Id, {Pid, Ref}, Data#data.pending),
+    NewPending = maps:put(Id, {Pid, Ref, Responder}, Data#data.pending),
     {keep_state, Data#data{pending = NewPending}}.
 
 call_tool_handler(ToolName, Args, ToolSpec, Ctx) ->
@@ -603,46 +515,48 @@ validate_tool_output(_, Result) ->
 %% Resources — list, read, templates, subscribe (M2b)
 %%====================================================================
 
-handle_resources_list(Id, Params, Data) ->
+handle_resources_list(Id, Params, Data, Responder) ->
+    Resources = erlmcp_server:get_resources(Data#data.server_ref),
     Sorted = lists:sort(fun(A, B) ->
         maps:get(uri, A) =< maps:get(uri, B)
-    end, maps:values(Data#data.resources)),
+    end, maps:values(Resources)),
     Cursor = maps:get(<<"cursor">>, Params, undefined),
     {Page, NextCursor} = erlmcp_pagination:paginate(Sorted, Cursor),
     ResList = [format_resource_for_list(R) || R <- Page],
     Result = erlmcp_pagination:paginated_result(<<"resources">>, ResList, NextCursor),
-    send_response(Data, Id, Result),
+    send_response(Responder, Id, Result),
     keep_state_and_data.
 
-handle_resources_read(Id, Params, Data) ->
+handle_resources_read(Id, Params, Data, Responder) ->
     case maps:get(<<"uri">>, Params, undefined) of
         undefined ->
-            send_error(Data, Id, erlmcp_json_rpc:invalid_params(), <<"Missing uri">>),
+            send_error(Responder, Id, erlmcp_json_rpc:invalid_params(), <<"Missing uri">>),
             keep_state_and_data;
         Uri ->
-            case maps:get(Uri, Data#data.resources, undefined) of
+            Resources = erlmcp_server:get_resources(Data#data.server_ref),
+            ResourceTemplates = erlmcp_server:get_resource_templates(Data#data.server_ref),
+            case maps:get(Uri, Resources, undefined) of
                 undefined ->
-                    case erlmcp_uri_template:find_matching(Uri, Data#data.resource_templates) of
+                    case erlmcp_uri_template:find_matching(Uri, ResourceTemplates) of
                         {ok, TplSpec, TplParams} ->
-                            dispatch_resource_read(Id, Uri, TplSpec, TplParams, Data);
+                            dispatch_resource_read(Id, Uri, TplSpec, TplParams, Data, Responder);
                         error ->
-                            send_error(Data, Id, -32002, <<"Resource not found">>),
+                            send_error(Responder, Id, -32002, <<"Resource not found">>),
                             keep_state_and_data
                     end;
                 ResSpec ->
-                    dispatch_resource_read(Id, Uri, ResSpec, #{}, Data)
+                    dispatch_resource_read(Id, Uri, ResSpec, #{}, Data, Responder)
             end
     end.
 
-dispatch_resource_read(Id, Uri, Spec, Params, Data) ->
+dispatch_resource_read(Id, Uri, Spec, Params, Data, Responder) ->
     Session = self(),
-    Ctx = erlmcp_ctx:new(#{session => Session, transport => Data#data.transport,
-                           request_id => Id}),
+    Ctx = erlmcp_ctx:new(#{session => Session, request_id => Id}),
     {Pid, Ref} = spawn_monitor(fun() ->
         Result = call_resource_handler(Uri, Spec, Params, Ctx),
         _ = Session ! {worker_result, Id, Result}
     end),
-    NewPending = maps:put(Id, {Pid, Ref}, Data#data.pending),
+    NewPending = maps:put(Id, {Pid, Ref, Responder}, Data#data.pending),
     {keep_state, Data#data{pending = NewPending}}.
 
 call_resource_handler(Uri, Spec, Params, Ctx) ->
@@ -662,27 +576,28 @@ call_resource_handler(Uri, Spec, Params, Ctx) ->
             {error, Code, Msg}
     end.
 
-handle_resource_templates_list(Id, Params, Data) ->
+handle_resource_templates_list(Id, Params, Data, Responder) ->
+    ResourceTemplates = erlmcp_server:get_resource_templates(Data#data.server_ref),
     Sorted = lists:sort(fun(A, B) ->
         maps:get(uri_template, A) =< maps:get(uri_template, B)
-    end, maps:values(Data#data.resource_templates)),
+    end, maps:values(ResourceTemplates)),
     Cursor = maps:get(<<"cursor">>, Params, undefined),
     {Page, NextCursor} = erlmcp_pagination:paginate(Sorted, Cursor),
     TplList = [format_resource_template_for_list(T) || T <- Page],
     Result = erlmcp_pagination:paginated_result(<<"resourceTemplates">>, TplList, NextCursor),
-    send_response(Data, Id, Result),
+    send_response(Responder, Id, Result),
     keep_state_and_data.
 
-handle_resources_subscribe(Id, Params, Data) ->
+handle_resources_subscribe(Id, Params, Data, Responder) ->
     Uri = maps:get(<<"uri">>, Params, <<>>),
     NewSubs = maps:put(Uri, true, Data#data.subscriptions),
-    send_response(Data, Id, #{}),
+    send_response(Responder, Id, #{}),
     {keep_state, Data#data{subscriptions = NewSubs}}.
 
-handle_resources_unsubscribe(Id, Params, Data) ->
+handle_resources_unsubscribe(Id, Params, Data, Responder) ->
     Uri = maps:get(<<"uri">>, Params, <<>>),
     NewSubs = maps:remove(Uri, Data#data.subscriptions),
-    send_response(Data, Id, #{}),
+    send_response(Responder, Id, #{}),
     {keep_state, Data#data{subscriptions = NewSubs}}.
 
 handle_resource_updated_cast(Uri, Data) ->
@@ -690,7 +605,7 @@ handle_resource_updated_cast(Uri, Data) ->
         true ->
             Json = erlmcp_json_rpc:encode_notification(
                        <<"notifications/resources/updated">>, #{<<"uri">> => Uri}),
-            send_raw(Data, Json);
+            send_raw(Data#data.responder, Json);
         false ->
             ok
     end,
@@ -712,38 +627,38 @@ format_resource_template_for_list(Spec) ->
 %% Prompts — list & get (M2b)
 %%====================================================================
 
-handle_prompts_list(Id, Params, Data) ->
+handle_prompts_list(Id, Params, Data, Responder) ->
+    Prompts = erlmcp_server:get_prompts(Data#data.server_ref),
     Sorted = lists:sort(fun(A, B) ->
         maps:get(name, A) =< maps:get(name, B)
-    end, maps:values(Data#data.prompts)),
+    end, maps:values(Prompts)),
     Cursor = maps:get(<<"cursor">>, Params, undefined),
     {Page, NextCursor} = erlmcp_pagination:paginate(Sorted, Cursor),
     PromptList = [format_prompt_for_list(P) || P <- Page],
     Result = erlmcp_pagination:paginated_result(<<"prompts">>, PromptList, NextCursor),
-    send_response(Data, Id, Result),
+    send_response(Responder, Id, Result),
     keep_state_and_data.
 
-handle_prompts_get(Id, Params, Data) ->
+handle_prompts_get(Id, Params, Data, Responder) ->
     case maps:get(<<"name">>, Params, undefined) of
         undefined ->
-            send_error(Data, Id, erlmcp_json_rpc:invalid_params(),
+            send_error(Responder, Id, erlmcp_json_rpc:invalid_params(),
                        <<"Missing prompt name">>),
             keep_state_and_data;
         Name ->
-            case maps:get(Name, Data#data.prompts, undefined) of
-                undefined ->
-                    send_error(Data, Id, -32003, <<"Prompt not found">>),
+            case erlmcp_server:get_prompt(Data#data.server_ref, Name) of
+                error ->
+                    send_error(Responder, Id, -32003, <<"Prompt not found">>),
                     keep_state_and_data;
-                PromptSpec ->
+                {ok, PromptSpec} ->
                     Args = maps:get(<<"arguments">>, Params, #{}),
-                    dispatch_prompt_get(Id, Name, Args, PromptSpec, Data)
+                    dispatch_prompt_get(Id, Name, Args, PromptSpec, Data, Responder)
             end
     end.
 
-dispatch_prompt_get(Id, _Name, Args, PromptSpec, Data) ->
+dispatch_prompt_get(Id, _Name, Args, PromptSpec, Data, Responder) ->
     Session = self(),
-    Ctx = erlmcp_ctx:new(#{session => Session, transport => Data#data.transport,
-                           request_id => Id}),
+    Ctx = erlmcp_ctx:new(#{session => Session, request_id => Id}),
     {Pid, Ref} = spawn_monitor(fun() ->
         Handler = maps:get(handler, PromptSpec),
         Result = case Handler(Args, Ctx) of
@@ -755,7 +670,7 @@ dispatch_prompt_get(Id, _Name, Args, PromptSpec, Data) ->
         end,
         _ = Session ! {worker_result, Id, Result}
     end),
-    NewPending = maps:put(Id, {Pid, Ref}, Data#data.pending),
+    NewPending = maps:put(Id, {Pid, Ref, Responder}, Data#data.pending),
     {keep_state, Data#data{pending = NewPending}}.
 
 format_prompt_for_list(Spec) ->
@@ -780,15 +695,15 @@ format_prompt_arg(Arg) when is_map(Arg) ->
 %% Logging (M2b)
 %%====================================================================
 
-handle_logging_set_level(Id, Params, Data) ->
+handle_logging_set_level(Id, Params, Data, Responder) ->
     LevelBin = maps:get(<<"level">>, Params, <<"emergency">>),
     Level = binary_to_existing_atom(LevelBin, utf8),
     case lists:member(Level, ?LOG_LEVELS) of
         true ->
-            send_response(Data, Id, #{}),
+            send_response(Responder, Id, #{}),
             {keep_state, Data#data{log_level = Level}};
         false ->
-            send_error(Data, Id, erlmcp_json_rpc:invalid_params(),
+            send_error(Responder, Id, erlmcp_json_rpc:invalid_params(),
                        <<"Invalid log level">>),
             keep_state_and_data
     end.
@@ -801,7 +716,7 @@ handle_emit_log(Level, Logger, LogData, Data) ->
                        <<"data">> => LogData},
             Json = erlmcp_json_rpc:encode_notification(
                        <<"notifications/message">>, Params),
-            send_raw(Data, Json);
+            send_raw(Data#data.responder, Json);
         false ->
             ok
     end,
@@ -820,7 +735,7 @@ log_level_value(emergency) -> 7.
 %% Completion (M2b)
 %%====================================================================
 
-handle_completion_complete(Id, Params, Data) ->
+handle_completion_complete(Id, Params, Data, Responder) ->
     Ref = maps:get(<<"ref">>, Params, #{}),
     RefType = maps:get(<<"type">>, Ref, <<>>),
     Argument = maps:get(<<"argument">>, Params, #{}),
@@ -841,13 +756,13 @@ handle_completion_complete(Id, Params, Data) ->
         <<"hasMore">> => false,
         <<"total">> => length(Values)
     }},
-    send_response(Data, Id, Result),
+    send_response(Responder, Id, Result),
     keep_state_and_data.
 
 complete_prompt_arg(PromptName, ArgName, Prefix, Data) ->
-    case maps:get(PromptName, Data#data.prompts, undefined) of
-        undefined -> [];
-        Spec ->
+    case erlmcp_server:get_prompt(Data#data.server_ref, PromptName) of
+        error -> [];
+        {ok, Spec} ->
             Completions = maps:get(completions, Spec, #{}),
             case maps:get(ArgName, Completions, undefined) of
                 undefined -> [];
@@ -856,7 +771,8 @@ complete_prompt_arg(PromptName, ArgName, Prefix, Data) ->
     end.
 
 complete_template_param(UriTemplate, ArgName, Prefix, Data) ->
-    case maps:get(UriTemplate, Data#data.resource_templates, undefined) of
+    ResourceTemplates = erlmcp_server:get_resource_templates(Data#data.server_ref),
+    case maps:get(UriTemplate, ResourceTemplates, undefined) of
         undefined -> [];
         Spec ->
             Completions = maps:get(completions, Spec, #{}),
@@ -870,19 +786,19 @@ complete_template_param(UriTemplate, ArgName, Prefix, Data) ->
 %% Tasks (M6a)
 %%====================================================================
 
-handle_tasks_get(Id, Params, Data) ->
+handle_tasks_get(Id, Params, Data, Responder) ->
     TaskId = maps:get(<<"id">>, Params, undefined),
     case maps:get(TaskId, Data#data.tasks, undefined) of
         undefined ->
-            send_error(Data, Id, -32002, <<"Task not found">>),
+            send_error(Responder, Id, -32002, <<"Task not found">>),
             keep_state_and_data;
         TaskPid ->
             {ok, Status} = erlmcp_task:get_status(TaskPid),
-            send_response(Data, Id, Status),
+            send_response(Responder, Id, Status),
             keep_state_and_data
     end.
 
-handle_tasks_list(Id, Data) ->
+handle_tasks_list(Id, Data, Responder) ->
     TaskList = maps:fold(fun(_TaskId, TaskPid, Acc) ->
         case is_process_alive(TaskPid) of
             true ->
@@ -892,47 +808,46 @@ handle_tasks_list(Id, Data) ->
                 Acc
         end
     end, [], Data#data.tasks),
-    send_response(Data, Id, #{<<"tasks">> => TaskList}),
+    send_response(Responder, Id, #{<<"tasks">> => TaskList}),
     keep_state_and_data.
 
-handle_tasks_result(Id, Params, Data) ->
+handle_tasks_result(Id, Params, Data, Responder) ->
     TaskId = maps:get(<<"id">>, Params, undefined),
     case maps:get(TaskId, Data#data.tasks, undefined) of
         undefined ->
-            send_error(Data, Id, -32002, <<"Task not found">>),
+            send_error(Responder, Id, -32002, <<"Task not found">>),
             keep_state_and_data;
         TaskPid ->
             case erlmcp_task:get_result(TaskPid) of
                 {ok, Result} ->
-                    send_response(Data, Id, Result),
+                    send_response(Responder, Id, Result),
                     keep_state_and_data;
                 {error, not_ready} ->
-                    send_error(Data, Id, -32002, <<"Task not ready">>),
+                    send_error(Responder, Id, -32002, <<"Task not ready">>),
                     keep_state_and_data;
                 {error, _Reason} ->
-                    send_error(Data, Id, -32603, <<"Task failed">>),
+                    send_error(Responder, Id, -32603, <<"Task failed">>),
                     keep_state_and_data
             end
     end.
 
-handle_tasks_cancel(Id, Params, Data) ->
+handle_tasks_cancel(Id, Params, Data, Responder) ->
     TaskId = maps:get(<<"id">>, Params, undefined),
     case maps:get(TaskId, Data#data.tasks, undefined) of
         undefined ->
-            send_error(Data, Id, -32002, <<"Task not found">>),
+            send_error(Responder, Id, -32002, <<"Task not found">>),
             keep_state_and_data;
         TaskPid ->
             ok = erlmcp_task:cancel(TaskPid),
-            send_response(Data, Id, #{}),
+            send_response(Responder, Id, #{}),
             keep_state_and_data
     end.
 
 start_task(ToolName, Args, ToolSpec, Meta, Data) ->
     TaskId = generate_task_id(),
     Session = self(),
-    Transport = Data#data.transport,
     ProgressToken = maps:get(<<"progressToken">>, Meta, TaskId),
-    Ctx = erlmcp_ctx:new(#{session => Session, transport => Transport,
+    Ctx = erlmcp_ctx:new(#{session => Session,
                            request_id => TaskId, progress_token => ProgressToken}),
     Handler = maps:get(handler, ToolSpec, undefined),
     HandlerMod = maps:get(handler_module, ToolSpec, undefined),
@@ -956,102 +871,32 @@ generate_task_id() ->
     <<"task-", (integer_to_binary(Int))/binary>>.
 
 %%====================================================================
-%% Registration — tools (M2a)
-%%====================================================================
-
-do_register_tool(From, ToolSpec, Data) ->
-    Name = maps:get(name, ToolSpec),
-    NewTools = maps:put(Name, ToolSpec, Data#data.tools),
-    NewData = Data#data{tools = NewTools},
-    maybe_notify(<<"notifications/tools/list_changed">>, NewData),
-    {keep_state, NewData, [{reply, From, ok}]}.
-
-do_unregister_tool(From, ToolName, Data) ->
-    NewTools = maps:remove(ToolName, Data#data.tools),
-    NewData = Data#data{tools = NewTools},
-    maybe_notify(<<"notifications/tools/list_changed">>, NewData),
-    {keep_state, NewData, [{reply, From, ok}]}.
-
-do_register_handler(From, Module, Data) ->
-    ToolSpecs = Module:tools(),
-    NewTools = lists:foldl(fun(Spec, Acc) ->
-        Name = maps:get(name, Spec),
-        maps:put(Name, Spec#{handler_module => Module}, Acc)
-    end, Data#data.tools, ToolSpecs),
-    NewData = Data#data{tools = NewTools},
-    maybe_notify(<<"notifications/tools/list_changed">>, NewData),
-    {keep_state, NewData, [{reply, From, ok}]}.
-
-%%====================================================================
-%% Registration — resources (M2b)
-%%====================================================================
-
-do_register_resource(From, Spec, Data) ->
-    Uri = maps:get(uri, Spec),
-    NewRes = maps:put(Uri, Spec, Data#data.resources),
-    NewData = Data#data{resources = NewRes},
-    maybe_notify(<<"notifications/resources/list_changed">>, NewData),
-    {keep_state, NewData, [{reply, From, ok}]}.
-
-do_unregister_resource(From, Uri, Data) ->
-    NewRes = maps:remove(Uri, Data#data.resources),
-    NewSubs = maps:remove(Uri, Data#data.subscriptions),
-    NewData = Data#data{resources = NewRes, subscriptions = NewSubs},
-    maybe_notify(<<"notifications/resources/list_changed">>, NewData),
-    {keep_state, NewData, [{reply, From, ok}]}.
-
-do_register_resource_template(From, Spec, Data) ->
-    UriT = maps:get(uri_template, Spec),
-    NewTpls = maps:put(UriT, Spec, Data#data.resource_templates),
-    NewData = Data#data{resource_templates = NewTpls},
-    maybe_notify(<<"notifications/resources/list_changed">>, NewData),
-    {keep_state, NewData, [{reply, From, ok}]}.
-
-do_unregister_resource_template(From, UriT, Data) ->
-    NewTpls = maps:remove(UriT, Data#data.resource_templates),
-    NewData = Data#data{resource_templates = NewTpls},
-    maybe_notify(<<"notifications/resources/list_changed">>, NewData),
-    {keep_state, NewData, [{reply, From, ok}]}.
-
-%%====================================================================
-%% Registration — prompts (M2b)
-%%====================================================================
-
-do_register_prompt(From, Spec, Data) ->
-    Name = maps:get(name, Spec),
-    NewPrompts = maps:put(Name, Spec, Data#data.prompts),
-    NewData = Data#data{prompts = NewPrompts},
-    maybe_notify(<<"notifications/prompts/list_changed">>, NewData),
-    {keep_state, NewData, [{reply, From, ok}]}.
-
-do_unregister_prompt(From, Name, Data) ->
-    NewPrompts = maps:remove(Name, Data#data.prompts),
-    NewData = Data#data{prompts = NewPrompts},
-    maybe_notify(<<"notifications/prompts/list_changed">>, NewData),
-    {keep_state, NewData, [{reply, From, ok}]}.
-
-%%====================================================================
 %% Capabilities & instructions
 %%====================================================================
 
 derive_capabilities(Data) ->
     Base = Data#data.capabilities,
-    B1 = case maps:size(Data#data.tools) of
+    Tab = Data#data.server_ref,
+    Tools = erlmcp_server:get_tools(Tab),
+    Resources = erlmcp_server:get_resources(Tab),
+    ResourceTemplates = erlmcp_server:get_resource_templates(Tab),
+    Prompts = erlmcp_server:get_prompts(Tab),
+    B1 = case maps:size(Tools) of
         0 -> Base;
         _ -> Base#{<<"tools">> => #{<<"listChanged">> => true}}
     end,
-    B2 = case maps:size(Data#data.resources) + maps:size(Data#data.resource_templates) of
+    B2 = case maps:size(Resources) + maps:size(ResourceTemplates) of
         0 -> B1;
         _ -> B1#{<<"resources">> => #{<<"subscribe">> => true, <<"listChanged">> => true}}
     end,
-    B3 = case maps:size(Data#data.prompts) of
+    B3 = case maps:size(Prompts) of
         0 -> B2;
         _ -> B2#{<<"prompts">> => #{<<"listChanged">> => true}}
     end,
     B4 = B3#{<<"logging">> => #{}, <<"completions">> => #{}},
     HasTasks = lists:any(fun(T) ->
         maps:get(task_support, T, forbidden) =/= forbidden
-    end, maps:values(Data#data.tools)),
+    end, maps:values(Tools)),
     case HasTasks of
         true -> B4#{<<"tasks">> => #{}};
         false -> B4
@@ -1064,7 +909,7 @@ derive_capabilities(Data) ->
 handle_peer_request(Caller, CallerRef, Method, Params, Data) ->
     {Id, NewData} = out_next_id(Data),
     Json = erlmcp_json_rpc:encode_request(Id, Method, Params),
-    send_raw(NewData, Json),
+    send_raw(NewData#data.responder, Json),
     OutPending = maps:put(Id, {Caller, CallerRef}, NewData#data.out_pending),
     {keep_state, NewData#data{out_pending = OutPending}}.
 
@@ -1095,18 +940,18 @@ out_next_id(#data{out_next_id = Id} = Data) ->
 
 handle_worker_result(Id, {ok, Result}, Data) ->
     case maps:take(Id, Data#data.pending) of
-        {{_Pid, Ref}, NewPending} ->
+        {{_Pid, Ref, ReplyTo}, NewPending} ->
             demonitor(Ref, [flush]),
-            send_response(Data, Id, Result),
+            send_response(ReplyTo, Id, Result),
             {keep_state, Data#data{pending = NewPending}};
         error ->
             keep_state_and_data
     end;
 handle_worker_result(Id, {error, Code, Message}, Data) ->
     case maps:take(Id, Data#data.pending) of
-        {{_Pid, Ref}, NewPending} ->
+        {{_Pid, Ref, ReplyTo}, NewPending} ->
             demonitor(Ref, [flush]),
-            send_error(Data, Id, Code, Message),
+            send_error(ReplyTo, Id, Code, Message),
             {keep_state, Data#data{pending = NewPending}};
         error ->
             keep_state_and_data
@@ -1118,14 +963,14 @@ handle_worker_down(Pid, Ref, Reason, Data) ->
     case find_request_by_worker(Pid, Data#data.pending) of
         {ok, Id} ->
             demonitor(Ref, [flush]),
-            NewPending = maps:remove(Id, Data#data.pending),
+            {{_P, _R, ReplyTo}, NewPending} = maps:take(Id, Data#data.pending),
             case Reason of
                 normal ->
                     {keep_state, Data#data{pending = NewPending}};
                 cancelled ->
                     {keep_state, Data#data{pending = NewPending}};
                 _ ->
-                    send_error(Data, Id, erlmcp_json_rpc:internal_error(),
+                    send_error(ReplyTo, Id, erlmcp_json_rpc:internal_error(),
                                <<"Internal error">>),
                     {keep_state, Data#data{pending = NewPending}}
             end;
@@ -1134,7 +979,7 @@ handle_worker_down(Pid, Ref, Reason, Data) ->
     end.
 
 %%====================================================================
-%% Request dispatch (M1 generic handler path)
+%% Request dispatch (generic handler path)
 %%====================================================================
 
 dispatch_request(Method, Params, Handlers, Ctx) ->
@@ -1151,31 +996,22 @@ dispatch_request(Method, Params, Handlers, Ctx) ->
 %% Wire helpers
 %%====================================================================
 
-send_response(#data{transport = Transport}, Id, Result) when is_pid(Transport) ->
+send_response(undefined, _Id, _Result) ->
+    ok;
+send_response(Responder, Id, Result) ->
     Json = erlmcp_json_rpc:encode_response(Id, Result),
-    Transport ! {send, Json},
-    ok;
-send_response(_, _, _) ->
-    ok.
+    erlmcp_reply:send(Responder, Json).
 
-send_error(#data{transport = Transport}, Id, Code, Message) when is_pid(Transport) ->
+send_error(undefined, _Id, _Code, _Message) ->
+    ok;
+send_error(Responder, Id, Code, Message) ->
     Json = erlmcp_json_rpc:encode_error_response(Id, Code, Message),
-    Transport ! {send, Json},
-    ok;
-send_error(_, _, _, _) ->
-    ok.
+    erlmcp_reply:send(Responder, Json).
 
-send_raw(#data{transport = Transport}, Json) when is_pid(Transport) ->
-    Transport ! {send, Json},
+send_raw(undefined, _Json) ->
     ok;
-send_raw(_, _) ->
-    ok.
-
-maybe_notify(_Method, #data{protocol_version = undefined}) ->
-    ok;
-maybe_notify(Method, Data) ->
-    Json = erlmcp_json_rpc:encode_notification(Method, #{}),
-    send_raw(Data, Json).
+send_raw(Responder, Json) ->
+    erlmcp_reply:send(Responder, Json).
 
 %%====================================================================
 %% Formatting helpers
@@ -1198,57 +1034,51 @@ format_tool_for_list(Spec) ->
         undefined -> B2;
         Ann -> B2#{<<"annotations">> => format_annotations(Ann)}
     end,
-    B4 = case maps:get(task_support, Spec, undefined) of
+    B4 = case maps:get(icons, Spec, undefined) of
         undefined -> B3;
-        TaskSupport -> B3#{<<"taskSupport">> => atom_to_binary(TaskSupport, utf8)}
+        Icons -> B3#{<<"icons">> => Icons}
     end,
-    B5 = case maps:get(icons, Spec, undefined) of
+    B5 = case maps:get(task_support, Spec, undefined) of
         undefined -> B4;
-        Icons -> B4#{<<"icons">> => Icons}
+        forbidden -> B4;
+        TaskSupport -> B4#{<<"taskSupport">> =>
+                           #{<<"supported">> => TaskSupport =/= forbidden}}
     end,
-    Meta = build_meta(Spec),
-    case maps:size(Meta) of
+    DiscMeta = disc_meta(Spec),
+    case maps:size(DiscMeta) of
         0 -> B5;
-        _ -> B5#{<<"_meta">> => Meta}
+        _ -> B5#{<<"_meta">> => DiscMeta}
     end.
+
+disc_meta(Spec) ->
+    lists:foldl(fun({ErlKey, JsonKey}, Acc) ->
+        case maps:get(ErlKey, Spec, undefined) of
+            undefined -> Acc;
+            Value -> Acc#{JsonKey => Value}
+        end
+    end, #{}, [
+        {category, <<"io.erlmcp/category">>},
+        {when_to_use, <<"io.erlmcp/when_to_use">>},
+        {next, <<"io.erlmcp/next">>},
+        {entry_point, <<"io.erlmcp/entry_point">>}
+    ]).
 
 format_annotations(Ann) when is_map(Ann) ->
-    maps:fold(fun
-        (K, V, Acc) when is_atom(K) ->
-            Acc#{atom_to_binary(K, utf8) => V};
-        (K, V, Acc) when is_binary(K) ->
-            Acc#{K => V}
+    maps:fold(fun(Key, Val, Acc) ->
+        BinKey = if is_atom(Key) -> atom_to_binary(Key, utf8);
+                    is_binary(Key) -> Key
+                 end,
+        Acc#{BinKey => Val}
     end, #{}, Ann).
 
-build_meta(Spec) ->
-    Prefix = <<"io.erlmcp/">>,
-    Keys = [{category, <<"category">>},
-            {when_to_use, <<"when_to_use">>},
-            {returns, <<"returns">>},
-            {next, <<"next">>},
-            {summary, <<"summary">>}],
-    lists:foldl(fun({Key, Suffix}, Acc) ->
-        case maps:get(Key, Spec, undefined) of
-            undefined -> Acc;
-            Value -> Acc#{<<Prefix/binary, Suffix/binary>> => Value}
-        end
-    end, #{}, Keys).
-
-maybe_add_field(JsonKey, AtomKey, Spec, Map) ->
-    case maps:get(AtomKey, Spec, undefined) of
-        undefined -> Map;
-        Value -> Map#{JsonKey => Value}
+maybe_add_field(JsonKey, ErlKey, Spec, Acc) ->
+    case maps:get(ErlKey, Spec, undefined) of
+        undefined -> Acc;
+        Value -> Acc#{JsonKey => Value}
     end.
 
-%%====================================================================
-%% Internal helpers
-%%====================================================================
-
 find_request_by_worker(Pid, Pending) ->
-    maps:fold(
-        fun(Id, {P, _Ref}, error) when P =:= Pid -> {ok, Id};
-           (_Id, _Val, Acc) -> Acc
-        end,
-        error,
-        Pending
-    ).
+    maps:fold(fun
+        (Id, {P, _, _}, error) when P =:= Pid -> {ok, Id};
+        (_, _, Acc) -> Acc
+    end, error, Pending).
