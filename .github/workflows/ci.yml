@@ -30,6 +30,11 @@ jobs:
     - name: Xref Checks
       run: rebar3 xref
 
+    - name: Compile Examples
+      run: |
+        rebar3 as simple compile
+        rebar3 as calculator compile
+        rebar3 as weather compile
     - name: EUnit Tests
       run: rebar3 eunit -v
     - name: Common Test

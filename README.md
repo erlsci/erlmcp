@@ -59,8 +59,8 @@ ok = erlmcp:add_tool(Server, #{
 ok = erlmcp:register_handler(Server, my_tools).
 ```
 
-See the [examples](test/) for complete calculator, weather, client, and
-sampling examples with CT suites.
+See [examples/](examples/) for runnable server demos and
+[test/](test/) for CT suites covering the full feature set.
 
 ## Documentation
 
