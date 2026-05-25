@@ -1,3 +1,4 @@
+%% -*- coding: utf-8 -*-
 -module(calculator_server).
 
 %% A runnable calculator MCP server demonstrating:
@@ -49,7 +50,7 @@ tools() ->
           returns => <<"The sum of a and b">>,
           next => [<<"subtract">>, <<"multiply">>, <<"slow_compute">>, <<"explain">>],
           entry_point => true,
-          icons => [#{<<"type">> => <<"emoji">>, <<"emoji">> => <<"➕">>}],
+          icons => emoji_icon(<<"➕"/utf8>>),
           annotations => #{readOnlyHint => true}},
         #{name => <<"subtract">>,
           description => <<"Subtract b from a">>,
@@ -111,8 +112,8 @@ slow_tool_spec() ->
       returns => <<"A completion message after all steps finish">>,
       summary => <<"Simulates a long-running job with progress notifications">>,
       next => [<<"add">>],
-      icons => [#{<<"type">> => <<"emoji">>, <<"emoji">> => <<"⏳"/utf8>>}],
-      task_support => allowed,
+      icons => emoji_icon(<<"⏳"/utf8>>),
+      task_support => optional,
       handler => fun slow_compute/2}.
 
 explain_tool_spec() ->
@@ -127,7 +128,7 @@ explain_tool_spec() ->
       returns => <<"The client's explanation of the expression">>,
       summary => <<"Demonstrates server-initiated sampling via request_peer">>,
       next => [<<"add">>],
-      icons => [#{<<"type">> => <<"emoji">>, <<"emoji">> => <<"💡"/utf8>>}],
+      icons => emoji_icon(<<"💡"/utf8>>),
       handler => fun explain_via_sampling/2}.
 
 slow_compute(#{<<"steps">> := Steps}, Ctx) ->
@@ -173,6 +174,26 @@ two_number_schema() ->
         erlmcp_schema:field(<<"a">>, erlmcp_schema:number(), [required]),
         erlmcp_schema:field(<<"b">>, erlmcp_schema:number(), [required])
     ]).
+
+%% Build a spec-conformant MCP `Icon` from an emoji glyph.
+%%
+%% The MCP schema's `Icon` requires a `src` URI (an HTTP/HTTPS URL or a
+%% `data:` URI) and permits only `mimeType`, `sizes`, and `theme`. There is
+%% no emoji icon variant. To keep the emoji flavour while emitting a real,
+%% renderable icon, we wrap the glyph in a tiny inline SVG and embed it as a
+%% base64-encoded `data:` URI. This demonstrates the genuine icon mechanism a
+%% client can actually display. `Emoji` must be a valid UTF-8 binary (use the
+%% `/utf8` literal modifier — without it the codepoint is truncated to a
+%% single byte and the payload ships malformed UTF-8).
+-spec emoji_icon(binary()) -> [map()].
+emoji_icon(Emoji) when is_binary(Emoji) ->
+    Svg = <<"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"48\" height=\"48\" "
+            "viewBox=\"0 0 48 48\"><text x=\"24\" y=\"36\" font-size=\"34\" "
+            "text-anchor=\"middle\">", Emoji/binary, "</text></svg>">>,
+    Src = <<"data:image/svg+xml;base64,", (base64:encode(Svg))/binary>>,
+    [#{<<"src">> => Src,
+       <<"mimeType">> => <<"image/svg+xml">>,
+       <<"sizes">> => [<<"any">>]}].
 
 format_num(N) when is_integer(N) -> integer_to_binary(N);
 format_num(N) when is_float(N) -> float_to_binary(N, [{decimals, 10}, compact]).

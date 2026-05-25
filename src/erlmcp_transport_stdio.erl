@@ -2,6 +2,8 @@
 
 -behaviour(gen_server).
 
+-include_lib("kernel/include/logger.hrl").
+
 %% Transport behaviour callbacks
 -export([send/2, close/1]).
 
@@ -125,6 +127,7 @@ handle_info({send, Data}, State) ->
 
 handle_info({line, Line}, #state{session = Session} = State)
   when is_pid(Session) ->
+    ?LOG_DEBUG("stdio transport: forwarding line to session ~p: ~p", [Session, Line]),
     Session ! {transport_data, Line},
     {noreply, State};
 
@@ -135,7 +138,9 @@ handle_info({'EXIT', Pid, Reason}, #state{reader = Pid} = State) ->
     logger:error("stdio reader died: ~p", [Reason]),
     {stop, {reader_died, Reason}, State};
 
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    ?LOG_DEBUG("stdio transport: unhandled info ~p (session=~p)",
+               [Info, State#state.session]),
     {noreply, State}.
 
 terminate(_Reason, #state{reader = Pid}) when is_pid(Pid) ->
@@ -165,10 +170,14 @@ default_read() ->
     io:get_line(user, "").
 
 read_loop(Parent, ReadFun) ->
-    case process_raw_input(ReadFun()) of
+    Raw = ReadFun(),
+    ?LOG_DEBUG("stdio reader: raw input ~p", [Raw]),
+    case process_raw_input(Raw) of
         eof ->
+            ?LOG_DEBUG("stdio reader: eof", []),
             exit(normal);
         {error, Reason} ->
+            ?LOG_DEBUG("stdio reader: read error ~p", [Reason]),
             exit({read_error, Reason});
         {deliver, Data} ->
             deliver_line(Parent, Data),
@@ -177,6 +186,11 @@ read_loop(Parent, ReadFun) ->
 
 deliver_line(Parent, RawLine) ->
     case prepare_line(RawLine) of
-        skip -> ok;
-        {send, Trimmed} -> Parent ! {line, Trimmed}, ok
+        skip ->
+            ?LOG_DEBUG("stdio reader: skipping blank line", []),
+            ok;
+        {send, Trimmed} ->
+            ?LOG_DEBUG("stdio reader: delivering line ~p", [Trimmed]),
+            Parent ! {line, Trimmed},
+            ok
     end.

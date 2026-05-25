@@ -36,13 +36,15 @@ for example in "${EXAMPLES[@]}"; do
     fi
 
     out="$(mktemp)"
+    err="$(mktemp)"
     # Send initialize, then hold stdin open (sleep) so the server doesn't see an
     # immediate EOF while it boots + replies. Cap the whole launch with a timeout.
     # Capture ALL stdout to a file (no `head -1` mid-pipe — that SIGPIPEs the VM).
+    # Keep stderr too (server boot logs / crashes) so failures are diagnosable.
     {
         printf '%s\n' "$INIT_REQ"
         sleep 10
-    } | timeout 25 bash "$SCRIPT" >"$out" 2>/dev/null || true
+    } | timeout 25 bash "$SCRIPT" >"$out" 2>"$err" || true
 
     # First line that looks like a JSON-RPC message; tolerate stray output before it.
     resp="$(grep -m1 '"jsonrpc"' "$out" 2>/dev/null || true)"
@@ -52,11 +54,14 @@ for example in "${EXAMPLES[@]}"; do
         echo "PASS: $example — valid JSON-RPC response"
         pass=$((pass + 1))
     else
-        echo "FAIL: $example — no valid JSON-RPC response on stdout. Captured (first 5 lines):"
+        echo "FAIL: $example — no valid JSON-RPC response on stdout."
+        echo "  --- stdout (first 5 lines) ---"
         sed 's/^/    /' "$out" | head -5
+        echo "  --- stderr (first 15 lines) ---"
+        sed 's/^/    /' "$err" | head -15
         fail=$((fail + 1))
     fi
-    rm -f "$out"
+    rm -f "$out" "$err"
 done
 
 echo

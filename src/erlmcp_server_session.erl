@@ -2,6 +2,8 @@
 
 -behaviour(gen_statem).
 
+-include_lib("kernel/include/logger.hrl").
+
 %% M1 API
 -export([start_link/1, send_message/2, set_transport/2, get_instructions/1]).
 %% Tools (M2a)
@@ -166,9 +168,11 @@ uninitialized(_EventType, _Event, _Data) ->
 %% State: initializing
 %%====================================================================
 
-initializing(cast, {transport_data, _RawData}, _Data) ->
+initializing(cast, {transport_data, RawData}, _Data) ->
+    ?LOG_DEBUG("session(initializing): dropping transport_data (cast) ~p", [RawData]),
     keep_state_and_data;
-initializing(info, {transport_data, _RawData}, _Data) ->
+initializing(info, {transport_data, RawData}, _Data) ->
+    ?LOG_DEBUG("session(initializing): dropping transport_data (info) ~p", [RawData]),
     keep_state_and_data;
 initializing({call, From}, Msg, Data) ->
     handle_common_call(From, Msg, initializing, Data);
@@ -198,7 +202,9 @@ operational(info, {peer_request, Caller, CallerRef, Method, Params}, Data) ->
     handle_peer_request(Caller, CallerRef, Method, Params, Data);
 operational({call, From}, Msg, Data) ->
     handle_common_call(From, Msg, operational, Data);
-operational(_EventType, _Event, _Data) ->
+operational(EventType, Event, _Data) ->
+    ?LOG_DEBUG("session(operational): unmatched event type=~p event=~p",
+               [EventType, Event]),
     keep_state_and_data.
 
 %%====================================================================
@@ -274,12 +280,16 @@ handle_uninitialized_data(RawData, Data) ->
     end.
 
 handle_operational_data(RawData, Data) ->
+    ?LOG_DEBUG("session(operational): raw input ~p", [RawData]),
     case erlmcp_json_rpc:decode_and_classify_any(RawData) of
         {ok, {batch, Items}} ->
+            ?LOG_DEBUG("session(operational): batch of ~p items", [length(Items)]),
             handle_batch(Items, Data);
         {ok, Classified} ->
+            ?LOG_DEBUG("session(operational): classified ~p", [Classified]),
             handle_operational_message(Classified, Data);
-        {error, _Reason} ->
+        {error, Reason} ->
+            ?LOG_DEBUG("session(operational): parse error ~p", [Reason]),
             send_error(Data, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
             keep_state_and_data
     end.

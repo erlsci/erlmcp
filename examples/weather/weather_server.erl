@@ -1,3 +1,4 @@
+%% -*- coding: utf-8 -*-
 -module(weather_server).
 
 %% A runnable weather MCP server demonstrating:
@@ -60,7 +61,7 @@ register_tools(Server) ->
         summary => <<"Looks up current weather using mock data">>,
         next => [<<"get_forecast">>],
         entry_point => true,
-        icons => [#{<<"type">> => <<"emoji">>, <<"emoji">> => <<"🌤"/utf8>>}],
+        icons => emoji_icon(<<"🌤"/utf8>>),
         annotations => #{readOnlyHint => true},
         handler => fun(#{<<"city">> := City}, _Ctx) ->
             {ok, erlmcp:text(weather_text(City))}
@@ -79,7 +80,7 @@ register_tools(Server) ->
         returns => <<"A list of daily forecasts">>,
         summary => <<"Generates mock forecast data for the requested days">>,
         next => [<<"get_weather">>],
-        icons => [#{<<"type">> => <<"emoji">>, <<"emoji">> => <<"📅"/utf8>>}],
+        icons => emoji_icon(<<"📅"/utf8>>),
         annotations => #{readOnlyHint => true},
         handler => fun(#{<<"city">> := City} = Args, _Ctx) ->
             Days = maps:get(<<"days">>, Args, 3),
@@ -161,12 +162,31 @@ weather_text(City) ->
     Conditions = [<<"sunny">>, <<"cloudy">>, <<"rainy">>, <<"windy">>],
     Condition = lists:nth(1 + erlang:phash2(City, 4), Conditions),
     <<City/binary, ": ", (integer_to_binary(Temp))/binary,
-      "°C, ", Condition/binary>>.
+      "°C, "/utf8, Condition/binary>>.
 
 forecast_text(City, Days) ->
     Lines = [begin
         Temp = 15 + erlang:phash2({City, D}, 20),
         <<"Day ", (integer_to_binary(D))/binary, ": ",
-          (integer_to_binary(Temp))/binary, "°C">>
+          (integer_to_binary(Temp))/binary, "°C"/utf8>>
     end || D <- lists:seq(1, Days)],
     iolist_to_binary(lists:join(<<"\n">>, Lines)).
+
+%%====================================================================
+%% Internal — icons
+%%====================================================================
+
+%% Build a spec-conformant MCP `Icon` from an emoji glyph. See the matching
+%% helper in calculator_server for the rationale: MCP `Icon` requires a `src`
+%% URI, so we render the emoji into an inline SVG and embed it as a base64
+%% `data:` URI rather than inventing a non-standard emoji field. `Emoji` must
+%% be valid UTF-8 (use the `/utf8` literal modifier).
+-spec emoji_icon(binary()) -> [map()].
+emoji_icon(Emoji) when is_binary(Emoji) ->
+    Svg = <<"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"48\" height=\"48\" "
+            "viewBox=\"0 0 48 48\"><text x=\"24\" y=\"36\" font-size=\"34\" "
+            "text-anchor=\"middle\">", Emoji/binary, "</text></svg>">>,
+    Src = <<"data:image/svg+xml;base64,", (base64:encode(Svg))/binary>>,
+    [#{<<"src">> => Src,
+       <<"mimeType">> => <<"image/svg+xml">>,
+       <<"sizes">> => [<<"any">>]}].
