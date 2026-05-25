@@ -59,8 +59,9 @@ ok = erlmcp:add_tool(Server, #{
 ok = erlmcp:register_handler(Server, my_tools).
 ```
 
-See [examples/](examples/) for runnable server demos and
-[test/](test/) for CT suites covering the full feature set.
+See [examples/](examples/README.md) for runnable server demos with
+Claude Desktop configs, and [test/](test/) for CT suites covering the
+full feature set.
 
 ## Documentation
 

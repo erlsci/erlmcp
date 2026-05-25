@@ -10,7 +10,7 @@
 
 -behaviour(erlmcp_server_handler).
 
--export([start/0, start/1, stop/1, slow_tool_spec/0]).
+-export([start/0, start/1, stop/1, slow_tool_spec/0, explain_tool_spec/0]).
 -export([tools/0, handle_tool/3]).
 
 -spec start() -> {ok, #{server := pid(), transport := pid()}}.
@@ -24,6 +24,7 @@ start(Config) ->
     ok = erlmcp:register_handler(Server, ?MODULE),
     ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
     ok = erlmcp:add_tool(Server, slow_tool_spec()),
+    ok = erlmcp:add_tool(Server, explain_tool_spec()),
     {ok, Result}.
 
 -spec stop(pid()) -> ok.
@@ -46,7 +47,7 @@ tools() ->
           category => <<"arithmetic">>,
           when_to_use => <<"When you need to add two numbers">>,
           returns => <<"The sum of a and b">>,
-          next => [<<"subtract">>, <<"multiply">>],
+          next => [<<"subtract">>, <<"multiply">>, <<"slow_compute">>, <<"explain">>],
           entry_point => true,
           icons => [#{<<"type">> => <<"emoji">>, <<"emoji">> => <<"➕">>}],
           annotations => #{readOnlyHint => true}},
@@ -106,8 +107,28 @@ slow_tool_spec() ->
               [required])
       ]),
       category => <<"demo">>,
+      when_to_use => <<"When you want to demonstrate task support with progress">>,
+      returns => <<"A completion message after all steps finish">>,
+      summary => <<"Simulates a long-running job with progress notifications">>,
+      next => [<<"add">>],
+      icons => [#{<<"type">> => <<"emoji">>, <<"emoji">> => <<"⏳"/utf8>>}],
       task_support => allowed,
       handler => fun slow_compute/2}.
+
+explain_tool_spec() ->
+    #{name => <<"explain">>,
+      description => <<"Ask the connected client (Claude) to explain a calculation">>,
+      input_schema => erlmcp_schema:object([
+          erlmcp_schema:field(<<"expression">>, erlmcp_schema:string(),
+              [required, {doc, <<"The math expression to explain (e.g. '2+3')">>}])
+      ]),
+      category => <<"demo">>,
+      when_to_use => <<"When you want the client to generate an explanation (exercises server-to-client sampling)">>,
+      returns => <<"The client's explanation of the expression">>,
+      summary => <<"Demonstrates server-initiated sampling via request_peer">>,
+      next => [<<"add">>],
+      icons => [#{<<"type">> => <<"emoji">>, <<"emoji">> => <<"💡"/utf8>>}],
+      handler => fun explain_via_sampling/2}.
 
 slow_compute(#{<<"steps">> := Steps}, Ctx) ->
     lists:foreach(fun(I) ->
@@ -117,6 +138,31 @@ slow_compute(#{<<"steps">> := Steps}, Ctx) ->
               (integer_to_binary(Steps))/binary>>)
     end, lists:seq(1, Steps)),
     {ok, erlmcp:text(<<"Completed ", (integer_to_binary(Steps))/binary, " steps">>)}.
+
+%%====================================================================
+%% Server-initiated sampling (ENH-7: exercises server→client request_peer)
+%%====================================================================
+
+explain_via_sampling(#{<<"expression">> := Expr}, Ctx) ->
+    Params = #{
+        <<"messages">> => [
+            #{<<"role">> => <<"user">>,
+              <<"content">> => #{
+                  <<"type">> => <<"text">>,
+                  <<"text">> => <<"Explain this calculation step by step: ", Expr/binary>>
+              }}
+        ],
+        <<"maxTokens">> => 200
+    },
+    case erlmcp_ctx:request_peer(Ctx, <<"sampling/createMessage">>, Params) of
+        {ok, Result} ->
+            Content = maps:get(<<"content">>, Result, #{}),
+            Text = maps:get(<<"text">>, Content, <<"(no explanation)">>),
+            {ok, erlmcp:text(Text)};
+        {error, Reason} ->
+            Msg = iolist_to_binary(io_lib:format("~p", [Reason])),
+            {error, -32603, <<"Sampling failed: ", Msg/binary>>}
+    end.
 
 %%====================================================================
 %% Internal

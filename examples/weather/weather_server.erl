@@ -3,9 +3,8 @@
 %% A runnable weather MCP server demonstrating:
 %%   - Resources (static + handler-backed)
 %%   - Resource templates with completion
-%%   - Subscriptions (notify on resource update)
 %%   - Prompts with arguments and completion
-%%   - Logging
+%%   - Discoverability (full wayfinding, directory tool)
 %%   - Multiple transports (stdio + tcp)
 
 -export([start_stdio/0, start_stdio/1, start_tcp/2, stop/1]).
@@ -38,13 +37,14 @@ stop(Server) ->
 
 -spec register_all(pid()) -> ok.
 register_all(Server) ->
+    ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
     register_tools(Server),
     register_resources(Server),
     register_prompts(Server),
     ok.
 
 %%====================================================================
-%% Tools
+%% Tools — full discoverability wayfinding
 %%====================================================================
 
 register_tools(Server) ->
@@ -55,8 +55,35 @@ register_tools(Server) ->
             erlmcp_schema:field(<<"city">>, erlmcp_schema:string(), [required])
         ]),
         category => <<"weather">>,
+        when_to_use => <<"When you need current weather conditions for a city">>,
+        returns => <<"Temperature, condition, and city name">>,
+        summary => <<"Looks up current weather using mock data">>,
+        next => [<<"get_forecast">>],
+        entry_point => true,
+        icons => [#{<<"type">> => <<"emoji">>, <<"emoji">> => <<"🌤"/utf8>>}],
+        annotations => #{readOnlyHint => true},
         handler => fun(#{<<"city">> := City}, _Ctx) ->
             {ok, erlmcp:text(weather_text(City))}
+        end
+    }),
+    ok = erlmcp:add_tool(Server, #{
+        name => <<"get_forecast">>,
+        description => <<"Get a multi-day weather forecast for a city">>,
+        input_schema => erlmcp_schema:object([
+            erlmcp_schema:field(<<"city">>, erlmcp_schema:string(), [required]),
+            erlmcp_schema:field(<<"days">>, erlmcp_schema:integer([{min, 1}, {max, 7}]),
+                [{default, 3}])
+        ]),
+        category => <<"weather">>,
+        when_to_use => <<"When you need a multi-day forecast">>,
+        returns => <<"A list of daily forecasts">>,
+        summary => <<"Generates mock forecast data for the requested days">>,
+        next => [<<"get_weather">>],
+        icons => [#{<<"type">> => <<"emoji">>, <<"emoji">> => <<"📅"/utf8>>}],
+        annotations => #{readOnlyHint => true},
+        handler => fun(#{<<"city">> := City} = Args, _Ctx) ->
+            Days = maps:get(<<"days">>, Args, 3),
+            {ok, erlmcp:text(forecast_text(City, Days))}
         end
     }).
 
@@ -135,3 +162,11 @@ weather_text(City) ->
     Condition = lists:nth(1 + erlang:phash2(City, 4), Conditions),
     <<City/binary, ": ", (integer_to_binary(Temp))/binary,
       "°C, ", Condition/binary>>.
+
+forecast_text(City, Days) ->
+    Lines = [begin
+        Temp = 15 + erlang:phash2({City, D}, 20),
+        <<"Day ", (integer_to_binary(D))/binary, ": ",
+          (integer_to_binary(Temp))/binary, "°C">>
+    end || D <- lists:seq(1, Days)],
+    iolist_to_binary(lists:join(<<"\n">>, Lines)).
