@@ -136,3 +136,15 @@ CI-green). **Two rows added:** P6M1-18 (conformance harness on new core),
 P6M1-19 (client side passes against new core). CC's iter-2 marking of all 17 as
 `done` overstated against its own evidence; the row count and statuses above
 supersede it. Fix brief: `docs/0.6.0/prompts/phase6-m1-iteration3-fixup-cc-prompt.md`.
+
+**Iteration 4 (test consolidation, 2026-05-25):** iter-3 MUSTs 1–4 landed
+(conformance harness on new core, `pre_init_rejected` fixed, client side passing).
+CDC verified the remaining red (12 failures + 3 cancelled, all in
+`erlmcp_session_tests`) is **not** a code regression — operational ping is proven
+working by conformance (`scenario_initialize`→`scenario_ping` on the shared
+session) and the SUITE. The red is stale-API churn in the **old**
+`erlmcp_session_tests` (48 cases), which duplicates `erlmcp_server_session_SUITE`
+(50 cases). Decision (Duncan): **retire `erlmcp_session_tests`** — fold unique
+cases into the SUITE, delete it, then close P6M1-14/17/18/19. Brief:
+`docs/0.6.0/prompts/phase6-m1-iteration4-test-consolidation-cc-prompt.md`. This is
+iteration 4 of 5.

@@ -107,10 +107,10 @@ pre_init_rejected_test() ->
 
 worker_crash_isolation_test() ->
     CrashHandler = fun(_Params, _Ctx) -> error(intentional_crash) end,
-    _ = srv_with_handlers(#{<<"crash/test">> => CrashHandler}),
+    TestSrv = srv_with_handlers(#{<<"crash/test">> => CrashHandler}),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test-server">>,
         version => <<"1.0">>
     }),
@@ -132,10 +132,10 @@ cancellation_test() ->
     SlowHandler = fun(_Params, _Ctx) ->
         receive after 5000 -> {ok, #{}} end
     end,
-    _ = srv_with_handlers(#{<<"slow/test">> => SlowHandler}),
+    TestSrv = srv_with_handlers(#{<<"slow/test">> => SlowHandler}),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test-server">>,
         version => <<"1.0">>
     }),
@@ -192,9 +192,11 @@ parse_error_in_operational_test() ->
     gen_statem:stop(Server).
 
 ping_in_operational_test() ->
+    flush_mailbox(),
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test-server">>,
         version => <<"1.0">>
     }),
@@ -263,9 +265,10 @@ worker_error_result_test() ->
     gen_statem:stop(Server).
 
 method_not_found_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test-server">>,
         version => <<"1.0">>
     }),
@@ -318,9 +321,9 @@ cancel_nonexistent_request_test() ->
 
 mfa_handler_test() ->
     Responder = erlmcp_reply:new_device(self()),
-    _ = srv_with_handlers(#{<<"mfa">> => {erlmcp_capabilities, supported_versions}}),
+    TestSrv = srv_with_handlers(#{<<"mfa">> => {erlmcp_capabilities, supported_versions}}),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test-server">>,
         version => <<"1.0">>
     }),
@@ -352,50 +355,48 @@ terminate_test() ->
 %%====================================================================
 
 tools_register_and_list_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_tool(srv(), #{
+    ok = erlmcp_server:register_tool(TestSrv, #{
         name => <<"echo">>,
         description => <<"Echo tool">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
     }),
-    [Tool] = maps:values(erlmcp_server:get_tools(erlmcp_server:catalog_table(srv()))),
+    [Tool] = maps:values(erlmcp_server:get_tools(erlmcp_server:catalog_table(TestSrv))),
     ?assertEqual(<<"echo">>, maps:get(name, Tool)),
     gen_statem:stop(Server).
 
 tools_unregister_test() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
-    }),
-    ok = erlmcp_server:register_tool(srv(), #{
+    TestSrv = srv(),
+    ok = erlmcp_server:register_tool(TestSrv, #{
         name => <<"t">>, description => <<"t">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
     }),
-    ok = erlmcp_server:unregister_tool(srv(), <<"t">>),
-    ?assertEqual([], maps:values(erlmcp_server:get_tools(erlmcp_server:catalog_table(srv())))),
-    gen_statem:stop(Server).
+    ok = erlmcp_server:unregister_tool(TestSrv, <<"t">>),
+    ?assertEqual([], maps:values(erlmcp_server:get_tools(erlmcp_server:catalog_table(TestSrv)))),
+    gen_server:stop(TestSrv).
 
 tools_register_handler_module_test() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
-    }),
-    ok = erlmcp_server:register_handler(srv(), test_calc_handler),
-    Tools = maps:values(erlmcp_server:get_tools(erlmcp_server:catalog_table(srv()))),
+    TestSrv = srv(),
+    ok = erlmcp_server:register_handler(TestSrv, test_calc_handler),
+    Tools = maps:values(erlmcp_server:get_tools(erlmcp_server:catalog_table(TestSrv))),
     ?assert(length(Tools) > 0),
-    gen_statem:stop(Server).
+    gen_server:stop(TestSrv).
 
 tools_call_fun_handler_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_tool(srv(), #{
+    ok = erlmcp_server:register_tool(TestSrv, #{
         name => <<"double">>,
         description => <<"Double">>,
         input_schema => erlmcp_schema:object([
@@ -418,12 +419,13 @@ tools_call_fun_handler_test() ->
     gen_statem:stop(Server).
 
 tools_call_behaviour_handler_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_handler(srv(), test_calc_handler),
+    ok = erlmcp_server:register_handler(TestSrv, test_calc_handler),
     init_server_with_transport(Server),
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
         <<"name">> => <<"add">>,
@@ -436,12 +438,13 @@ tools_call_behaviour_handler_test() ->
     gen_statem:stop(Server).
 
 tools_call_input_validation_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_tool(srv(), #{
+    ok = erlmcp_server:register_tool(TestSrv, #{
         name => <<"strict">>,
         description => <<"Strict">>,
         input_schema => erlmcp_schema:object([
@@ -460,9 +463,10 @@ tools_call_input_validation_test() ->
     gen_statem:stop(Server).
 
 tools_call_unknown_tool_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     init_server_with_transport(Server),
@@ -476,9 +480,10 @@ tools_call_unknown_tool_test() ->
     gen_statem:stop(Server).
 
 tools_call_missing_name_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     init_server_with_transport(Server),
@@ -491,12 +496,13 @@ tools_call_missing_name_test() ->
     gen_statem:stop(Server).
 
 tools_list_via_protocol_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_tool(srv(), #{
+    ok = erlmcp_server:register_tool(TestSrv, #{
         name => <<"t1">>,
         description => <<"Tool 1">>,
         input_schema => erlmcp_schema:object([]),
@@ -519,15 +525,16 @@ tools_list_via_protocol_test() ->
     gen_statem:stop(Server).
 
 tools_structured_output_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     OutSchema = erlmcp_schema:object([
         erlmcp_schema:field(<<"result">>, erlmcp_schema:number(), [required])
     ]),
-    ok = erlmcp_server:register_tool(srv(), #{
+    ok = erlmcp_server:register_tool(TestSrv, #{
         name => <<"calc">>,
         description => <<"Calc">>,
         input_schema => erlmcp_schema:object([]),
@@ -545,15 +552,16 @@ tools_structured_output_test() ->
     gen_statem:stop(Server).
 
 tools_output_validation_failure_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     OutSchema = erlmcp_schema:object([
         erlmcp_schema:field(<<"value">>, erlmcp_schema:string(), [required])
     ]),
-    ok = erlmcp_server:register_tool(srv(), #{
+    ok = erlmcp_server:register_tool(TestSrv, #{
         name => <<"bad">>,
         description => <<"Bad output">>,
         input_schema => erlmcp_schema:object([]),
@@ -570,13 +578,14 @@ tools_output_validation_failure_test() ->
     gen_statem:stop(Server).
 
 tools_list_changed_notification_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     init_server_with_transport(Server),
-    ok = erlmcp_server:register_tool(srv(), #{
+    ok = erlmcp_server:register_tool(TestSrv, #{
         name => <<"dyn">>, description => <<"Dyn">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
@@ -584,19 +593,20 @@ tools_list_changed_notification_test() ->
     Notif = decode_resp(wait_transport_send()),
     ?assertEqual(<<"notifications/tools/list_changed">>,
                  maps:get(<<"method">>, Notif)),
-    ok = erlmcp_server:unregister_tool(srv(), <<"dyn">>),
+    ok = erlmcp_server:unregister_tool(TestSrv, <<"dyn">>),
     Notif2 = decode_resp(wait_transport_send()),
     ?assertEqual(<<"notifications/tools/list_changed">>,
                  maps:get(<<"method">>, Notif2)),
     gen_statem:stop(Server).
 
 tools_progress_notification_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_tool(srv(), #{
+    ok = erlmcp_server:register_tool(TestSrv, #{
         name => <<"slow">>,
         description => <<"Slow">>,
         input_schema => erlmcp_schema:object([]),
@@ -621,12 +631,13 @@ tools_progress_notification_test() ->
     gen_statem:stop(Server).
 
 capability_tools_derived_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_tool(srv(), #{
+    ok = erlmcp_server:register_tool(TestSrv, #{
         name => <<"t">>, description => <<"t">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
@@ -644,12 +655,13 @@ capability_tools_derived_test() ->
     gen_statem:stop(Server).
 
 instructions_generated_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_handler(srv(), test_calc_handler),
+    ok = erlmcp_server:register_handler(TestSrv, test_calc_handler),
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
@@ -665,12 +677,13 @@ instructions_generated_test() ->
     gen_statem:stop(Server).
 
 tools_all_content_types_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_tool(srv(), #{
+    ok = erlmcp_server:register_tool(TestSrv, #{
         name => <<"types">>,
         description => <<"All types">>,
         input_schema => erlmcp_schema:object([]),
@@ -699,9 +712,11 @@ tools_all_content_types_test() ->
 %%====================================================================
 
 init_server() ->
+    flush_mailbox(),
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test-server">>,
         version => <<"1.0">>
     }),
@@ -716,16 +731,17 @@ init_server() ->
 
 %% Cover resource/prompt/logging registration + list via protocol
 tools_list_with_meta_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_resource(srv(), #{
+    ok = erlmcp_server:register_resource(TestSrv, #{
         uri => <<"x://a">>, name => <<"A">>,
         handler => fun(_) -> {ok, #{<<"uri">> => <<"x://a">>, <<"text">> => <<"t">>}} end
     }),
-    ok = erlmcp_server:register_prompt(srv(), #{
+    ok = erlmcp_server:register_prompt(TestSrv, #{
         name => <<"p">>, description => <<"P">>,
         handler => fun(_, _) -> {ok, []} end
     }),
@@ -738,9 +754,10 @@ tools_list_with_meta_test() ->
     gen_statem:stop(Server).
 
 server_logging_emit_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     init_server_with_transport(Server),
@@ -751,12 +768,13 @@ server_logging_emit_test() ->
     gen_statem:stop(Server).
 
 server_resource_subscribe_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_resource(srv(), #{
+    ok = erlmcp_server:register_resource(TestSrv, #{
         uri => <<"x://a">>, name => <<"A">>,
         handler => fun(_) -> {ok, #{<<"uri">> => <<"x://a">>, <<"text">> => <<"t">>}} end
     }),
@@ -771,12 +789,13 @@ server_resource_subscribe_test() ->
     gen_statem:stop(Server).
 
 server_completion_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_prompt(srv(), #{
+    ok = erlmcp_server:register_prompt(TestSrv, #{
         name => <<"p">>, description => <<"P">>,
         handler => fun(_, _) -> {ok, []} end,
         completions => #{<<"arg">> => fun(_) -> [<<"v1">>] end}
@@ -793,9 +812,10 @@ server_completion_test() ->
 
 %% Cover initializing/shutting_down state catch-alls
 initializing_state_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     gen_statem:cast(Server, {transport_data, <<"junk">>}),
@@ -808,12 +828,13 @@ initializing_state_test() ->
 
 %% Cover {M,F} dispatch path
 mf_tool_dispatch_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_tool(srv(), #{
+    ok = erlmcp_server:register_tool(TestSrv, #{
         name => <<"mf_tool">>,
         description => <<"MF dispatch">>,
         input_schema => erlmcp_schema:object([]),
@@ -831,9 +852,10 @@ mf_tool_dispatch_test() ->
 
 %% Cover log levels not hit in other tests
 log_levels_coverage_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     init_server_with_transport(Server),
@@ -847,14 +869,15 @@ log_levels_coverage_test() ->
 
 %% Cover pagination cursor path (>50 items)
 pagination_cursor_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     lists:foreach(fun(N) ->
         Name = list_to_binary("tool_" ++ integer_to_list(N)),
-        ok = erlmcp_server:register_tool(srv(), #{
+        ok = erlmcp_server:register_tool(TestSrv, #{
             name => Name, description => Name,
             input_schema => erlmcp_schema:object([]),
             handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
@@ -879,12 +902,13 @@ pagination_cursor_test() ->
 
 %% Cover resource handler error path
 resource_handler_error_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_resource(srv(), #{
+    ok = erlmcp_server:register_resource(TestSrv, #{
         uri => <<"err://fail">>, name => <<"Fail">>,
         handler => fun(_Ctx) -> {error, -32000, <<"custom error">>} end
     }),
@@ -898,12 +922,13 @@ resource_handler_error_test() ->
 
 %% Cover template match failure paths
 template_match_failure_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_resource_template(srv(), #{
+    ok = erlmcp_server:register_resource_template(TestSrv, #{
         uri_template => <<"t://a/{id}/b">>, name => <<"T">>,
         handler => fun(_, _) -> {ok, #{<<"uri">> => <<"t://x">>, <<"text">> => <<"y">>}} end
     }),
@@ -917,9 +942,10 @@ template_match_failure_test() ->
 
 %% Cover completion for missing prompt/template
 completion_missing_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     init_server_with_transport(Server),
@@ -935,9 +961,10 @@ completion_missing_test() ->
 
 %% Cover unknown common_call in shutting_down
 shutting_down_call_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     ?assertEqual({error, unknown_request}, gen_statem:call(Server, bogus)),
@@ -945,9 +972,10 @@ shutting_down_call_test() ->
 
 %% Cover inbound via info (not cast) — the M4 transport path
 inbound_via_info_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
@@ -964,12 +992,13 @@ inbound_via_info_test() ->
 
 %% Cover resource list contents format
 resource_list_contents_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_resource(srv(), #{
+    ok = erlmcp_server:register_resource(TestSrv, #{
         uri => <<"r://a">>, name => <<"A">>,
         description => <<"Desc A">>, mime_type => <<"text/plain">>,
         handler => fun(_Ctx) ->
@@ -988,12 +1017,13 @@ resource_list_contents_test() ->
 
 %% Cover prompt get error path
 prompt_get_error_test() ->
+    TestSrv = srv(),
     Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        server => srv(), responder => Responder,
+        server => TestSrv, responder => Responder,
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
-    ok = erlmcp_server:register_prompt(srv(), #{
+    ok = erlmcp_server:register_prompt(TestSrv, #{
         name => <<"fail_prompt">>, description => <<"Fails">>,
         handler => fun(_, _) -> {error, -32000, <<"prompt error">>} end
     }),
@@ -1021,6 +1051,9 @@ decode_resp(Json) ->
 
 wait_transport_send() ->
     receive {send, Data} -> Data after 5000 -> error(transport_send_timeout) end.
+
+flush_mailbox() ->
+    receive _ -> flush_mailbox() after 0 -> ok end.
 
 flush_sends() ->
     receive {send, _} -> flush_sends() after 0 -> ok end.
