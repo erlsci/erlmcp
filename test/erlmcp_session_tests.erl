@@ -6,27 +6,15 @@
 %% Helpers — test server management
 %%====================================================================
 
-ensure_test_server() ->
-    case get(test_srv) of
-        undefined ->
-            {ok, Srv} = erlmcp_server:start_link(#{
-                name => <<"test">>, version => <<"1.0">>}),
-            put(test_srv, Srv),
-            Srv;
-        Srv -> Srv
-    end.
-
-srv() -> ensure_test_server().
+srv() ->
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"test">>, version => <<"1.0">>}),
+    Srv.
 
 srv_with_handlers(Handlers) when is_map(Handlers) ->
-    case get(test_srv) of
-        undefined -> ok;
-        OldSrv -> catch gen_server:stop(OldSrv)
-    end,
     {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"test">>, version => <<"1.0">>,
         handlers => Handlers}),
-    put(test_srv, Srv),
     Srv.
 
 %%====================================================================
@@ -119,11 +107,12 @@ pre_init_rejected_test() ->
 
 worker_crash_isolation_test() ->
     CrashHandler = fun(_Params, _Ctx) -> error(intentional_crash) end,
+    _ = srv_with_handlers(#{<<"crash/test">> => CrashHandler}),
+    Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
+        server => srv(), responder => Responder,
         name => <<"test-server">>,
-        version => <<"1.0">>,
-        capabilities => #{<<"tools">> => #{}},
-        handlers => #{<<"crash/test">> => CrashHandler}
+        version => <<"1.0">>
     }),
     InitRequest = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
@@ -143,11 +132,12 @@ cancellation_test() ->
     SlowHandler = fun(_Params, _Ctx) ->
         receive after 5000 -> {ok, #{}} end
     end,
+    _ = srv_with_handlers(#{<<"slow/test">> => SlowHandler}),
+    Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
+        server => srv(), responder => Responder,
         name => <<"test-server">>,
-        version => <<"1.0">>,
-        capabilities => #{<<"tools">> => #{}},
-        handlers => #{<<"slow/test">> => SlowHandler}
+        version => <<"1.0">>
     }),
     InitRequest = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
@@ -196,7 +186,7 @@ parse_error_in_uninitialized_test() ->
 parse_error_in_operational_test() ->
     {ok, Server} = init_server(),
     erlmcp_server_session:send_message(Server, <<"not json">>),
-    timer:sleep(50),
+    _ = wait_transport_send(),
     ?assert(is_process_alive(Server)),
     ?assertEqual(operational, gen_statem:call(Server, get_state)),
     gen_statem:stop(Server).
@@ -328,12 +318,11 @@ cancel_nonexistent_request_test() ->
 
 mfa_handler_test() ->
     Responder = erlmcp_reply:new_device(self()),
+    _ = srv_with_handlers(#{<<"mfa">> => {erlmcp_capabilities, supported_versions}}),
     {ok, Server} = erlmcp_server_session:start_link(#{
         server => srv(), responder => Responder,
         name => <<"test-server">>,
-        version => <<"1.0">>,
-        capabilities => #{<<"tools">> => #{}},
-        handlers => #{<<"mfa">> => {erlmcp_capabilities, supported_versions}}
+        version => <<"1.0">>
     }),
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
@@ -710,10 +699,11 @@ tools_all_content_types_test() ->
 %%====================================================================
 
 init_server() ->
+    Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
+        server => srv(), responder => Responder,
         name => <<"test-server">>,
-        version => <<"1.0">>,
-        capabilities => #{<<"tools">> => #{}}
+        version => <<"1.0">>
     }),
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
@@ -721,7 +711,7 @@ init_server() ->
         <<"clientInfo">> => #{<<"name">> => <<"test">>, <<"version">> => <<"1.0">>}
     }),
     erlmcp_server_session:send_message(Server, InitReq),
-    timer:sleep(50),
+    _ = wait_transport_send(),
     {ok, Server}.
 
 %% Cover resource/prompt/logging registration + list via protocol
