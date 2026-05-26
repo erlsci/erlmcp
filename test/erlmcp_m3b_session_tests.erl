@@ -14,15 +14,16 @@ bridge(Peer) ->
 setup_pair() ->
     SBridge = spawn_link(fun() -> bridge(undefined) end),
     CBridge = spawn_link(fun() -> bridge(undefined) end),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => SBridge,
+    {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"test-server">>, version => <<"1.0">>,
-        capabilities => #{}
+        tools => [#{name => <<"noop">>, description => <<"Noop">>,
+                    input_schema => erlmcp_schema:object([]),
+                    handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end}]
     }),
-    ok = erlmcp:add_tool(Server, #{
-        name => <<"noop">>, description => <<"Noop">>,
-        input_schema => erlmcp_schema:object([]),
-        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    Responder = erlmcp_reply:new_device(SBridge),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"test-server">>, version => <<"1.0">>
     }),
     {ok, Client} = erlmcp_client_session:start_link(#{
         transport => CBridge,
@@ -38,15 +39,15 @@ setup_pair() ->
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
-    {Server, Client}.
+    {Srv, Server, Client}.
 
 %%====================================================================
 %% Sampling end-to-end
 %%====================================================================
 
 sampling_test() ->
-    {Server, Client} = setup_pair(),
-    ok = erlmcp:add_tool(Server, #{
+    {Srv, Server, Client} = setup_pair(),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"sample">>, description => <<"Sample">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->
@@ -66,8 +67,8 @@ sampling_test() ->
 %%====================================================================
 
 roots_test() ->
-    {Server, Client} = setup_pair(),
-    ok = erlmcp:add_tool(Server, #{
+    {Srv, Server, Client} = setup_pair(),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"roots">>, description => <<"Roots">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->
@@ -82,7 +83,7 @@ roots_test() ->
     erlmcp_client_session:stop(Client).
 
 roots_changed_test() ->
-    {_Server, Client} = setup_pair(),
+    {_Srv, _Server, Client} = setup_pair(),
     erlmcp_client_session:notify_roots_changed(Client),
     timer:sleep(100),
     ?assert(is_process_alive(Client)),
@@ -93,8 +94,8 @@ roots_changed_test() ->
 %%====================================================================
 
 elicitation_test() ->
-    {Server, Client} = setup_pair(),
-    ok = erlmcp:add_tool(Server, #{
+    {Srv, Server, Client} = setup_pair(),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"elicit">>, description => <<"Elicit">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->
@@ -113,8 +114,8 @@ elicitation_test() ->
 %%====================================================================
 
 unknown_method_test() ->
-    {Server, Client} = setup_pair(),
-    ok = erlmcp:add_tool(Server, #{
+    {Srv, Server, Client} = setup_pair(),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"unknown">>, description => <<"Unknown">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->
@@ -135,8 +136,8 @@ unknown_method_test() ->
 %%====================================================================
 
 validation_failure_test() ->
-    {Server, Client} = setup_pair(),
-    ok = erlmcp:add_tool(Server, #{
+    {Srv, Server, Client} = setup_pair(),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"invalid">>, description => <<"Invalid">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->
@@ -159,14 +160,16 @@ validation_failure_test() ->
 callback_crash_test() ->
     SBridge = spawn_link(fun() -> bridge(undefined) end),
     CBridge = spawn_link(fun() -> bridge(undefined) end),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => SBridge,
-        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    {ok, CrashSrv} = erlmcp_server:start_link(#{
+        name => <<"test">>, version => <<"1.0">>,
+        tools => [#{name => <<"noop">>, description => <<"Noop">>,
+                    input_schema => erlmcp_schema:object([]),
+                    handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end}]
     }),
-    ok = erlmcp:add_tool(Server, #{
-        name => <<"noop">>, description => <<"Noop">>,
-        input_schema => erlmcp_schema:object([]),
-        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    Responder = erlmcp_reply:new_device(SBridge),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        server => CrashSrv, responder => Responder,
+        name => <<"test">>, version => <<"1.0">>
     }),
     {ok, Client} = erlmcp_client_session:start_link(#{
         transport => CBridge, owner => self(),
@@ -179,7 +182,7 @@ callback_crash_test() ->
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
-    ok = erlmcp:add_tool(Server, #{
+    ok = erlmcp:add_tool(CrashSrv, #{
         name => <<"crash">>, description => <<"Crash">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->
@@ -205,9 +208,13 @@ callback_crash_test() ->
 capability_advertisement_test() ->
     SBridge = spawn_link(fun() -> bridge(undefined) end),
     CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, _AdvSrv} = erlmcp_server:start_link(#{
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    AdvResp = erlmcp_reply:new_device(SBridge),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => SBridge,
-        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+        server => _AdvSrv, responder => AdvResp,
+        name => <<"test">>, version => <<"1.0">>
     }),
     {ok, Client} = erlmcp_client_session:start_link(#{
         transport => CBridge, owner => self(),
@@ -229,7 +236,7 @@ capability_advertisement_test() ->
 %%====================================================================
 
 set_handler_operational_test() ->
-    {_Server, Client} = setup_pair(),
+    {_Srv, _Server, Client} = setup_pair(),
     ok = erlmcp_client_session:set_sampling_handler(Client, test_sampling_handler),
     ok = erlmcp_client_session:set_roots_handler(Client, test_roots_handler),
     ok = erlmcp_client_session:set_elicitation_handler(Client, test_elicitation_handler),
@@ -241,8 +248,8 @@ set_handler_operational_test() ->
 %%====================================================================
 
 inbound_request_wire_test() ->
-    {Server, Client} = setup_pair(),
-    ok = erlmcp:add_tool(Server, #{
+    {Srv, Server, Client} = setup_pair(),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"wire">>, description => <<"Wire test">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->

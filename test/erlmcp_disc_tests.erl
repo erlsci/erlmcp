@@ -225,8 +225,8 @@ test_no_behavioral_keys_in_meta_test() ->
 %%====================================================================
 
 test_instructions_no_tool_enumeration_test() ->
-    {_DSrv, Server} = setup_session(),
-    ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
+    {DSrv, Server} = setup_session(),
+    ok = erlmcp:add_tool(DSrv, erlmcp:make_directory_tool()),
     init_session(Server),
     Instructions = erlmcp_server_session:get_instructions(Server),
     NonEntryToolNames = [<<"subtract">>, <<"multiply">>, <<"divide">>],
@@ -235,7 +235,7 @@ test_instructions_no_tool_enumeration_test() ->
             lists:flatten(io_lib:format(
                 "instructions should not contain ~s", [Name])))
     end, NonEntryToolNames),
-    ok = erlmcp:add_tool(Server, #{
+    ok = erlmcp:add_tool(DSrv, #{
         name => <<"sqrt">>,
         description => <<"Square root">>,
         input_schema => erlmcp_schema:object([]),
@@ -246,11 +246,12 @@ test_instructions_no_tool_enumeration_test() ->
     _ = wait_send(),
     InstructionsAfterAdd = erlmcp_server_session:get_instructions(Server),
     ?assertEqual(Instructions, InstructionsAfterAdd),
-    ok = erlmcp:remove_tool(Server, <<"sqrt">>),
+    ok = erlmcp:remove_tool(DSrv, <<"sqrt">>),
     _ = wait_send(),
     InstructionsAfterRemove = erlmcp_server_session:get_instructions(Server),
     ?assertEqual(Instructions, InstructionsAfterRemove),
-    gen_statem:stop(Server).
+    gen_statem:stop(Server),
+    gen_server:stop(DSrv).
 
 %%====================================================================
 %% DISC-9: Runtime changes reflected in directory and _meta

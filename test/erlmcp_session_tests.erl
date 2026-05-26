@@ -175,12 +175,11 @@ parse_error_in_operational_test() ->
     gen_statem:stop(Server).
 
 ping_in_operational_test() ->
-    Transport = self(),
+    Responder = erlmcp_reply:new_device(self()),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => Transport,
+        responder => Responder,
         name => <<"test-server">>,
-        version => <<"1.0">>,
-        capabilities => #{}
+        version => <<"1.0">>
     }),
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,

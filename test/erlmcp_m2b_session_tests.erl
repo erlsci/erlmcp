@@ -9,7 +9,7 @@
 resources_list_test() ->
     Transport = self(),
     {ok, S} = start_server(Transport),
-    ok = erlmcp_server_session:register_resource(S, #{
+    ok = erlmcp_server:register_resource(get(m2b_srv), #{
         uri => <<"test://a">>, name => <<"A">>,
         mime_type => <<"text/plain">>,
         handler => fun(_Ctx) -> {ok, #{<<"uri">> => <<"test://a">>, <<"text">> => <<"hi">>}} end
@@ -26,7 +26,7 @@ resources_list_test() ->
 resources_read_test() ->
     Transport = self(),
     {ok, S} = start_server(Transport),
-    ok = erlmcp_server_session:register_resource(S, #{
+    ok = erlmcp_server:register_resource(get(m2b_srv), #{
         uri => <<"test://a">>, name => <<"A">>,
         handler => fun(_Ctx) -> {ok, #{<<"uri">> => <<"test://a">>, <<"text">> => <<"content">>}} end
     }),
@@ -56,7 +56,7 @@ resources_read_missing_uri_test() ->
 resources_read_template_test() ->
     Transport = self(),
     {ok, S} = start_server(Transport),
-    ok = erlmcp_server_session:register_resource_template(S, #{
+    ok = erlmcp_server:register_resource_template(get(m2b_srv), #{
         uri_template => <<"test://{id}">>, name => <<"Item">>,
         handler => fun(#{<<"id">> := Id}, _Ctx) ->
             {ok, #{<<"uri">> => <<"test://", Id/binary>>, <<"text">> => Id}}
@@ -72,7 +72,7 @@ resources_read_template_test() ->
 resource_templates_list_test() ->
     Transport = self(),
     {ok, S} = start_server(Transport),
-    ok = erlmcp_server_session:register_resource_template(S, #{
+    ok = erlmcp_server:register_resource_template(get(m2b_srv), #{
         uri_template => <<"test://{id}">>, name => <<"Item">>,
         handler => fun(_, _) -> {ok, #{<<"uri">> => <<"x">>, <<"text">> => <<"y">>}} end
     }),
@@ -85,13 +85,13 @@ resource_templates_list_test() ->
 resources_subscribe_updated_test() ->
     Transport = self(),
     {ok, S} = start_server(Transport),
-    ok = erlmcp_server_session:register_resource(S, #{
+    ok = erlmcp_server:register_resource(get(m2b_srv), #{
         uri => <<"test://a">>, name => <<"A">>,
         handler => fun(_Ctx) -> {ok, #{<<"uri">> => <<"test://a">>, <<"text">> => <<"x">>}} end
     }),
     init_session(S),
     _ = send_req(S, 3, <<"resources/subscribe">>, #{<<"uri">> => <<"test://a">>}),
-    erlmcp_server_session:notify_resource_updated(S, <<"test://a">>),
+    gen_statem:cast(S, {resource_updated, <<"test://a">>}),
     Notif = decode(wait_send()),
     ?assertEqual(<<"notifications/resources/updated">>, maps:get(<<"method">>, Notif)),
     gen_statem:stop(S).
@@ -102,7 +102,7 @@ resources_unsubscribe_test() ->
     init_session(S),
     _ = send_req(S, 3, <<"resources/subscribe">>, #{<<"uri">> => <<"test://a">>}),
     _ = send_req(S, 4, <<"resources/unsubscribe">>, #{<<"uri">> => <<"test://a">>}),
-    erlmcp_server_session:notify_resource_updated(S, <<"test://a">>),
+    gen_statem:cast(S, {resource_updated, <<"test://a">>}),
     receive {send, _} -> ?assert(false) after 200 -> ok end,
     gen_statem:stop(S).
 
@@ -110,13 +110,13 @@ resources_list_changed_test() ->
     Transport = self(),
     {ok, S} = start_server(Transport),
     init_session(S),
-    ok = erlmcp_server_session:register_resource(S, #{
+    ok = erlmcp_server:register_resource(get(m2b_srv), #{
         uri => <<"test://b">>, name => <<"B">>,
         handler => fun(_Ctx) -> {ok, #{<<"uri">> => <<"test://b">>, <<"text">> => <<"y">>}} end
     }),
     Notif = decode(wait_send()),
     ?assertEqual(<<"notifications/resources/list_changed">>, maps:get(<<"method">>, Notif)),
-    ok = erlmcp_server_session:unregister_resource(S, <<"test://b">>),
+    ok = erlmcp_server:unregister_resource(get(m2b_srv), <<"test://b">>),
     Notif2 = decode(wait_send()),
     ?assertEqual(<<"notifications/resources/list_changed">>, maps:get(<<"method">>, Notif2)),
     gen_statem:stop(S).
@@ -128,7 +128,7 @@ resources_list_changed_test() ->
 prompts_list_test() ->
     Transport = self(),
     {ok, S} = start_server(Transport),
-    ok = erlmcp_server_session:register_prompt(S, #{
+    ok = erlmcp_server:register_prompt(get(m2b_srv), #{
         name => <<"greet">>, description => <<"Greet">>,
         arguments => [#{name => <<"name">>, required => true}],
         handler => fun(#{<<"name">> := N}, _) ->
@@ -148,7 +148,7 @@ prompts_list_test() ->
 prompts_get_test() ->
     Transport = self(),
     {ok, S} = start_server(Transport),
-    ok = erlmcp_server_session:register_prompt(S, #{
+    ok = erlmcp_server:register_prompt(get(m2b_srv), #{
         name => <<"greet">>, description => <<"Greet">>,
         handler => fun(#{<<"name">> := N}, _) ->
             {ok, [#{<<"role">> => <<"user">>,
@@ -187,13 +187,13 @@ prompts_list_changed_test() ->
     Transport = self(),
     {ok, S} = start_server(Transport),
     init_session(S),
-    ok = erlmcp_server_session:register_prompt(S, #{
+    ok = erlmcp_server:register_prompt(get(m2b_srv), #{
         name => <<"tmp">>, description => <<"Tmp">>,
         handler => fun(_, _) -> {ok, []} end
     }),
     Notif = decode(wait_send()),
     ?assertEqual(<<"notifications/prompts/list_changed">>, maps:get(<<"method">>, Notif)),
-    ok = erlmcp_server_session:unregister_prompt(S, <<"tmp">>),
+    ok = erlmcp_server:unregister_prompt(get(m2b_srv), <<"tmp">>),
     Notif2 = decode(wait_send()),
     ?assertEqual(<<"notifications/prompts/list_changed">>, maps:get(<<"method">>, Notif2)),
     gen_statem:stop(S).
@@ -238,7 +238,7 @@ logging_invalid_level_test() ->
 completion_prompt_test() ->
     Transport = self(),
     {ok, S} = start_server(Transport),
-    ok = erlmcp_server_session:register_prompt(S, #{
+    ok = erlmcp_server:register_prompt(get(m2b_srv), #{
         name => <<"p">>, description => <<"P">>,
         handler => fun(_, _) -> {ok, []} end,
         completions => #{<<"arg">> => fun(_Prefix) -> [<<"val1">>, <<"val2">>] end}
@@ -255,7 +255,7 @@ completion_prompt_test() ->
 completion_template_test() ->
     Transport = self(),
     {ok, S} = start_server(Transport),
-    ok = erlmcp_server_session:register_resource_template(S, #{
+    ok = erlmcp_server:register_resource_template(get(m2b_srv), #{
         uri_template => <<"t://{x}">>, name => <<"T">>,
         handler => fun(_, _) -> {ok, #{<<"uri">> => <<"t://1">>, <<"text">> => <<"ok">>}} end,
         completions => #{<<"x">> => fun(_) -> [<<"a">>, <<"b">>] end}
@@ -276,11 +276,11 @@ completion_template_test() ->
 capability_resources_prompts_test() ->
     Transport = self(),
     {ok, S} = start_server(Transport),
-    ok = erlmcp_server_session:register_resource(S, #{
+    ok = erlmcp_server:register_resource(get(m2b_srv), #{
         uri => <<"x://a">>, name => <<"A">>,
         handler => fun(_) -> {ok, #{<<"uri">> => <<"x://a">>, <<"text">> => <<"t">>}} end
     }),
-    ok = erlmcp_server_session:register_prompt(S, #{
+    ok = erlmcp_server:register_prompt(get(m2b_srv), #{
         name => <<"p">>, description => <<"P">>,
         handler => fun(_, _) -> {ok, []} end
     }),
@@ -299,11 +299,17 @@ capability_resources_prompts_test() ->
 %% Helpers
 %%====================================================================
 
-start_server(Transport) ->
-    erlmcp_server_session:start_link(#{
-        transport => Transport,
-        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
-    }).
+start_server(_Transport) ->
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    put(m2b_srv, Srv),
+    {ok, Session}.
 
 init_session(S) ->
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
