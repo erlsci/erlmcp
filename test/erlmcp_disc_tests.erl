@@ -169,8 +169,8 @@ test_meta_key_namespace_test() ->
 %%====================================================================
 
 test_directory_covers_all_tools_test() ->
-    {_DSrv, Server} = setup_session(),
-    ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
+    {DSrv, Server} = setup_session(),
+    ok = erlmcp:add_tool(DSrv, erlmcp:make_directory_tool()),
     init_session(Server),
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
         <<"name">> => <<"directory">>,
@@ -183,9 +183,10 @@ test_directory_covers_all_tools_test() ->
     DirJson = maps:get(<<"text">>, Content),
     {ok, DirMap} = erlmcp_codec:decode(DirJson),
     DirToolCount = lists:sum([length(V) || V <- maps:values(DirMap)]),
-    ConformanceTools = erlmcp:conformance_tools(Server),
+    ConformanceTools = erlmcp:conformance_tools(DSrv),
     ?assertEqual(length(ConformanceTools), DirToolCount),
-    gen_statem:stop(Server).
+    gen_statem:stop(Server),
+    gen_server:stop(DSrv).
 
 test_directory_excluded_from_conformance_test() ->
     Server = setup(),
@@ -258,10 +259,10 @@ test_instructions_no_tool_enumeration_test() ->
 %%====================================================================
 
 test_runtime_change_reflected_test() ->
-    {_DSrv, Server} = setup_session(),
-    ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
+    {DSrv, Server} = setup_session(),
+    ok = erlmcp:add_tool(DSrv, erlmcp:make_directory_tool()),
     init_session(Server),
-    ok = erlmcp:add_tool(Server, #{
+    ok = erlmcp:add_tool(DSrv, #{
         name => <<"modulo">>,
         description => <<"Modulo operation">>,
         input_schema => erlmcp_schema:object([]),
@@ -277,7 +278,7 @@ test_runtime_change_reflected_test() ->
               || T <- maps:get(<<"tools">>,
                                maps:get(<<"result">>, ListResp1))],
     ?assert(lists:member(<<"modulo">>, Names1)),
-    ok = erlmcp:remove_tool(Server, <<"modulo">>),
+    ok = erlmcp:remove_tool(DSrv, <<"modulo">>),
     _ = wait_send(),
     ListReq2 = erlmcp_json_rpc:encode_request(4, <<"tools/list">>, #{}),
     erlmcp_server_session:send_message(Server, ListReq2),

@@ -377,8 +377,8 @@ call_tool_with_progress_token_test() ->
 %%====================================================================
 
 cancel_pending_request_test() ->
-    {_Srv, _Server, Client} = setup_pair(),
-    ok = erlmcp:add_tool(_Server, #{
+    {CancelSrv, _Server, Client} = setup_pair(),
+    ok = erlmcp:add_tool(CancelSrv, #{
         name => <<"block">>, description => <<"Block">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, _) -> receive after 10000 -> ok end end
