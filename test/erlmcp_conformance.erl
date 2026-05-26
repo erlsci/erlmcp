@@ -44,9 +44,10 @@
 
 -spec run_server_scorecard() -> {float(), [{atom(), binary(), pass | fail}]}.
 run_server_scorecard() ->
-    Server = setup_conformance_server(),
+    {Session, Srv} = setup_conformance_server(),
+    Ctx = #{session => Session, server => Srv},
     Results = lists:map(fun({Level, Name, ScenarioFun}) ->
-        try ScenarioFun(Server) of
+        try ScenarioFun(Ctx) of
             pass -> {Level, Name, pass};
             fail -> {Level, Name, fail}
         catch _:_ ->
@@ -55,7 +56,8 @@ run_server_scorecard() ->
     end, ?SCENARIOS),
     catch application:stop(erlmcp),
     timer:sleep(100),
-    gen_statem:stop(Server),
+    catch gen_statem:stop(Session),
+    catch gen_server:stop(Srv),
     Passed = length([ok || {_, _, pass} <- Results]),
     Total = length(Results),
     Score = (Passed / Total) * 100,
@@ -128,7 +130,7 @@ setup_conformance_server() ->
         server => Srv, responder => Responder,
         name => <<"conformance-server">>, version => <<"1.0">>
     }),
-    Session.
+    {Session, Srv}.
 
 %%====================================================================
 %% L0 scenarios — protocol basics
@@ -169,12 +171,14 @@ scenario_version_negotiation(_Server) ->
         false -> fail
     end.
 
-scenario_pre_init_rejected(_Server) ->
+%% Ping intentionally succeeds in uninitialized state (liveness probe per MCP spec).
+%% Test pre-init rejection with a method that requires initialization.
+scenario_pre_init_rejected(_Ctx) ->
     R2 = erlmcp_reply:new_device(self()),
     {ok, S2} = erlmcp_server_session:start_link(#{
         responder => R2, name => <<"t">>, version => <<"1.0">>
     }),
-    Resp = send_req(S2, 1, <<"ping">>, #{}),
+    Resp = send_req(S2, 1, <<"tools/list">>, #{}),
     gen_statem:stop(S2),
     case maps:is_key(<<"error">>, Resp) of
         true -> pass;
@@ -258,12 +262,12 @@ scenario_resources_templates(Server) ->
         false -> fail
     end.
 
-scenario_resources_subscribe(Server) ->
-    _ = send_req(Server, 11, <<"resources/subscribe">>,
+scenario_resources_subscribe(#{session := Session} = Ctx) ->
+    _ = send_req(Ctx, 11, <<"resources/subscribe">>,
                  #{<<"uri">> => <<"conf://data/1">>}),
-    gen_statem:cast(Server, {resource_updated, <<"conf://data/1">>}),
+    gen_statem:cast(Session, {resource_updated, <<"conf://data/1">>}),
     Notif = decode(wait_send()),
-    _ = send_req(Server, 12, <<"resources/unsubscribe">>,
+    _ = send_req(Ctx, 12, <<"resources/unsubscribe">>,
                  #{<<"uri">> => <<"conf://data/1">>}),
     case maps:get(<<"method">>, Notif, <<>>) of
         <<"notifications/resources/updated">> -> pass;
@@ -330,29 +334,27 @@ scenario_completion(Server) ->
         _ -> fail
     end.
 
-scenario_capabilities_derived(_Server) ->
+scenario_capabilities_derived(_Ctx) ->
+    {ok, Srv2} = erlmcp_server:start_link(#{
+        name => <<"t">>, version => <<"1.0">>,
+        tools => [#{name => <<"t">>, description => <<"t">>,
+                    input_schema => erlmcp_schema:object([]),
+                    handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end}],
+        resources => [#{uri => <<"x://a">>, name => <<"A">>,
+                        handler => fun(_) -> {ok, #{<<"uri">> => <<"x://a">>, <<"text">> => <<"t">>}} end}],
+        prompts => [#{name => <<"p">>, description => <<"P">>,
+                      handler => fun(_, _) -> {ok, []} end}]
+    }),
+    R2 = erlmcp_reply:new_device(self()),
     {ok, S2} = erlmcp_server_session:start_link(#{
-        transport => self(), name => <<"t">>, version => <<"1.0">>,
-        capabilities => #{}
-    }),
-    ok = erlmcp_server_session:register_tool(S2, #{
-        name => <<"t">>, description => <<"t">>,
-        input_schema => erlmcp_schema:object([]),
-        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
-    }),
-    ok = erlmcp_server_session:register_resource(S2, #{
-        uri => <<"x://a">>, name => <<"A">>,
-        handler => fun(_) -> {ok, #{<<"uri">> => <<"x://a">>, <<"text">> => <<"t">>}} end
-    }),
-    ok = erlmcp_server_session:register_prompt(S2, #{
-        name => <<"p">>, description => <<"P">>,
-        handler => fun(_, _) -> {ok, []} end
+        server => Srv2, responder => R2, name => <<"t">>, version => <<"1.0">>
     }),
     Resp = send_req(S2, 1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
     gen_statem:stop(S2),
+    gen_server:stop(Srv2),
     Caps = maps:get(<<"capabilities">>,
                     maps:get(<<"result">>, Resp, #{}), #{}),
     case maps:is_key(<<"tools">>, Caps)
@@ -364,40 +366,40 @@ scenario_capabilities_derived(_Server) ->
         false -> fail
     end.
 
-scenario_tools_list_changed(Server) ->
-    ok = erlmcp_server_session:register_tool(Server, #{
+scenario_tools_list_changed(#{server := Srv}) ->
+    ok = erlmcp_server:register_tool(Srv, #{
         name => <<"tmp_tool">>, description => <<"Tmp">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
     }),
     Notif = decode(wait_send()),
-    ok = erlmcp_server_session:unregister_tool(Server, <<"tmp_tool">>),
+    ok = erlmcp_server:unregister_tool(Srv, <<"tmp_tool">>),
     _ = wait_send(),
     case maps:get(<<"method">>, Notif, <<>>) of
         <<"notifications/tools/list_changed">> -> pass;
         _ -> fail
     end.
 
-scenario_resources_list_changed(Server) ->
-    ok = erlmcp_server_session:register_resource(Server, #{
+scenario_resources_list_changed(#{server := Srv}) ->
+    ok = erlmcp_server:register_resource(Srv, #{
         uri => <<"tmp://r">>, name => <<"Tmp">>,
         handler => fun(_) -> {ok, #{<<"uri">> => <<"tmp://r">>, <<"text">> => <<"t">>}} end
     }),
     Notif = decode(wait_send()),
-    ok = erlmcp_server_session:unregister_resource(Server, <<"tmp://r">>),
+    ok = erlmcp_server:unregister_resource(Srv, <<"tmp://r">>),
     _ = wait_send(),
     case maps:get(<<"method">>, Notif, <<>>) of
         <<"notifications/resources/list_changed">> -> pass;
         _ -> fail
     end.
 
-scenario_prompts_list_changed(Server) ->
-    ok = erlmcp_server_session:register_prompt(Server, #{
+scenario_prompts_list_changed(#{server := Srv}) ->
+    ok = erlmcp_server:register_prompt(Srv, #{
         name => <<"tmp_prompt">>, description => <<"Tmp">>,
         handler => fun(_, _) -> {ok, []} end
     }),
     Notif = decode(wait_send()),
-    ok = erlmcp_server_session:unregister_prompt(Server, <<"tmp_prompt">>),
+    ok = erlmcp_server:unregister_prompt(Srv, <<"tmp_prompt">>),
     _ = wait_send(),
     case maps:get(<<"method">>, Notif, <<>>) of
         <<"notifications/prompts/list_changed">> -> pass;
@@ -446,27 +448,27 @@ scenario_structured_output(Server) ->
         false -> fail
     end.
 
-scenario_batch(Server) ->
+scenario_batch(#{session := Session}) ->
     Batch = jsx:encode([
         #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 100, <<"method">> => <<"ping">>},
         #{<<"jsonrpc">> => <<"2.0">>, <<"method">> => <<"notifications/initialized">>}
     ]),
-    erlmcp_server_session:send_message(Server, Batch),
+    erlmcp_server_session:send_message(Session, Batch),
     Resp = decode(wait_send()),
     case is_list(Resp) andalso length(Resp) =:= 1 of
         true -> pass;
         false -> fail
     end.
 
-scenario_task_lifecycle(Server) ->
-    ok = erlmcp_server_session:register_tool(Server, #{
+scenario_task_lifecycle(#{session := Session, server := Srv}) ->
+    ok = erlmcp_server:register_tool(Srv, #{
         name => <<"task_conf">>, description => <<"Task conf">>,
         input_schema => erlmcp_schema:object([]),
         task_support => optional,
         handler => fun(_, _) -> timer:sleep(100), {ok, erlmcp:text(<<"done">>)} end
     }),
     _ = wait_send(),
-    CallResp = send_req(Server, 50, <<"tools/call">>, #{
+    CallResp = send_req(Session, 50, <<"tools/call">>, #{
         <<"name">> => <<"task_conf">>,
         <<"arguments">> => #{},
         <<"_meta">> => #{<<"_task">> => true}
@@ -475,7 +477,7 @@ scenario_task_lifecycle(Server) ->
         undefined -> fail;
         TaskId ->
             timer:sleep(200),
-            ResultResp = send_req(Server, 51, <<"tasks/result">>,
+            ResultResp = send_req(Session, 51, <<"tasks/result">>,
                                   #{<<"id">> => TaskId}),
             case maps:is_key(<<"result">>, ResultResp) of
                 true -> pass;
@@ -483,22 +485,24 @@ scenario_task_lifecycle(Server) ->
             end
     end.
 
-scenario_instructions(_Server) ->
-    {ok, S2} = erlmcp_server_session:start_link(#{
-        transport => self(), name => <<"t">>, version => <<"1.0">>,
-        capabilities => #{}
+scenario_instructions(_Ctx) ->
+    {ok, Srv2} = erlmcp_server:start_link(#{
+        name => <<"t">>, version => <<"1.0">>,
+        tools => [#{name => <<"t">>, description => <<"t">>,
+                    input_schema => erlmcp_schema:object([]),
+                    category => <<"test">>, when_to_use => <<"testing">>,
+                    handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end}]
     }),
-    ok = erlmcp_server_session:register_tool(S2, #{
-        name => <<"t">>, description => <<"t">>,
-        input_schema => erlmcp_schema:object([]),
-        category => <<"test">>, when_to_use => <<"testing">>,
-        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    R2 = erlmcp_reply:new_device(self()),
+    {ok, S2} = erlmcp_server_session:start_link(#{
+        server => Srv2, responder => R2, name => <<"t">>, version => <<"1.0">>
     }),
     Resp = send_req(S2, 1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
     gen_statem:stop(S2),
+    gen_server:stop(Srv2),
     Result = maps:get(<<"result">>, Resp, #{}),
     case maps:is_key(<<"instructions">>, Result) of
         true -> pass;
@@ -603,12 +607,16 @@ run_client_scorecard() ->
 setup_client_pair() ->
     SB = spawn_link(fun() -> cbridge(undefined) end),
     CB = spawn_link(fun() -> cbridge(undefined) end),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => SB, name => <<"cs">>, version => <<"1.0">>,
-        capabilities => #{}
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"cs">>, version => <<"1.0">>,
+        handler => example_calculator_handler
     }),
-    ok = erlmcp:register_handler(Server, example_calculator_handler),
-    ok = example_weather_handler:register_all(Server),
+    ok = example_weather_handler:register_all(Srv),
+    Responder = erlmcp_reply:new_device(SB),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"cs">>, version => <<"1.0">>
+    }),
     {ok, Client} = erlmcp_client_session:start_link(#{
         transport => CB, owner => self(),
         name => <<"cc">>, version => <<"1.0">>
@@ -617,12 +625,12 @@ setup_client_pair() ->
     ok = erlmcp_client_session:set_roots_handler(Client, test_roots_handler),
     ok = erlmcp_client_session:set_elicitation_handler(Client, test_elicitation_handler),
     SB ! {peer, Client},
-    CB ! {peer, Server},
+    CB ! {peer, Session},
     {ok, _} = erlmcp_client_session:initialize(Client, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
-    {Server, Client}.
+    {Srv, Session, Client}.
 
 cbridge(Peer) ->
     receive
@@ -634,63 +642,63 @@ cbridge(Peer) ->
     end.
 
 cs_initialize(_) ->
-    {_S, C} = setup_client_pair(),
+    {_Srv, _Sess, C} = setup_client_pair(),
     R = gen_statem:call(C, get_state),
     erlmcp_client_session:stop(C),
     case R of operational -> pass; _ -> fail end.
 
 cs_ping(_) ->
-    {_S, C} = setup_client_pair(),
+    {_Srv, _Sess, C} = setup_client_pair(),
     R = erlmcp_client_session:ping(C),
     erlmcp_client_session:stop(C),
     case R of ok -> pass; _ -> fail end.
 
 cs_list_tools(_) ->
-    {_S, C} = setup_client_pair(),
+    {_Srv, _Sess, C} = setup_client_pair(),
     R = erlmcp_client_session:list_tools(C),
     erlmcp_client_session:stop(C),
     case R of {ok, L} when length(L) >= 1 -> pass; _ -> fail end.
 
 cs_call_tool(_) ->
-    {_S, C} = setup_client_pair(),
+    {_Srv, _Sess, C} = setup_client_pair(),
     R = erlmcp_client_session:call_tool(C, <<"add">>,
         #{<<"a">> => 1, <<"b">> => 2}),
     erlmcp_client_session:stop(C),
     case R of {ok, _} -> pass; _ -> fail end.
 
 cs_list_resources(_) ->
-    {_S, C} = setup_client_pair(),
+    {_Srv, _Sess, C} = setup_client_pair(),
     R = erlmcp_client_session:list_resources(C),
     erlmcp_client_session:stop(C),
     case R of {ok, L} when length(L) >= 1 -> pass; _ -> fail end.
 
 cs_read_resource(_) ->
-    {_S, C} = setup_client_pair(),
+    {_Srv, _Sess, C} = setup_client_pair(),
     R = erlmcp_client_session:read_resource(C, <<"weather://current/london">>),
     erlmcp_client_session:stop(C),
     case R of {ok, _} -> pass; _ -> fail end.
 
 cs_list_prompts(_) ->
-    {_S, C} = setup_client_pair(),
+    {_Srv, _Sess, C} = setup_client_pair(),
     R = erlmcp_client_session:list_prompts(C),
     erlmcp_client_session:stop(C),
     case R of {ok, L} when length(L) >= 1 -> pass; _ -> fail end.
 
 cs_get_prompt(_) ->
-    {_S, C} = setup_client_pair(),
+    {_Srv, _Sess, C} = setup_client_pair(),
     R = erlmcp_client_session:get_prompt(C, <<"weather_report">>,
         #{<<"city">> => <<"london">>}),
     erlmcp_client_session:stop(C),
     case R of {ok, _} -> pass; _ -> fail end.
 
 cs_set_log_level(_) ->
-    {_S, C} = setup_client_pair(),
+    {_Srv, _Sess, C} = setup_client_pair(),
     R = erlmcp_client_session:set_log_level(C, info),
     erlmcp_client_session:stop(C),
     case R of ok -> pass; _ -> fail end.
 
 cs_completion(_) ->
-    {_S, C} = setup_client_pair(),
+    {_Srv, _Sess, C} = setup_client_pair(),
     R = erlmcp_client_session:complete(C,
         #{<<"type">> => <<"ref/prompt">>, <<"name">> => <<"weather_report">>},
         #{<<"name">> => <<"city">>, <<"value">> => <<"lon">>}),
@@ -700,9 +708,13 @@ cs_completion(_) ->
 cs_capability_gating(_) ->
     SB = spawn_link(fun() -> cbridge(undefined) end),
     CB = spawn_link(fun() -> cbridge(undefined) end),
+    {ok, BareServer} = erlmcp_server:start_link(#{
+        name => <<"bare">>, version => <<"1.0">>
+    }),
+    Resp = erlmcp_reply:new_device(SB),
     {ok, S} = erlmcp_server_session:start_link(#{
-        transport => SB, name => <<"bare">>, version => <<"1.0">>,
-        capabilities => #{}
+        server => BareServer, responder => Resp,
+        name => <<"bare">>, version => <<"1.0">>
     }),
     {ok, C} = erlmcp_client_session:start_link(#{
         transport => CB, owner => self(),
@@ -714,12 +726,12 @@ cs_capability_gating(_) ->
         <<"capabilities">> => #{}
     }),
     R = erlmcp_client_session:list_prompts(C),
-    erlmcp_client_session:stop(C), gen_statem:stop(S),
+    erlmcp_client_session:stop(C), gen_statem:stop(S), gen_server:stop(BareServer),
     case R of {error, {capability_not_supported, _}} -> pass; _ -> fail end.
 
 cs_sampling_callback(_) ->
-    {S, C} = setup_client_pair(),
-    ok = erlmcp:add_tool(S, #{
+    {Srv, _Sess, C} = setup_client_pair(),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"s">>, description => <<"S">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->
@@ -733,8 +745,8 @@ cs_sampling_callback(_) ->
     case R of {ok, _} -> pass; _ -> fail end.
 
 cs_roots_callback(_) ->
-    {S, C} = setup_client_pair(),
-    ok = erlmcp:add_tool(S, #{
+    {Srv, _Sess, C} = setup_client_pair(),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"r">>, description => <<"R">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->
@@ -747,8 +759,8 @@ cs_roots_callback(_) ->
     case R of {ok, _} -> pass; _ -> fail end.
 
 cs_elicitation_callback(_) ->
-    {S, C} = setup_client_pair(),
-    ok = erlmcp:add_tool(S, #{
+    {Srv, _Sess, C} = setup_client_pair(),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"e">>, description => <<"E">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->
@@ -764,9 +776,13 @@ cs_elicitation_callback(_) ->
 cs_capability_advertisement(_) ->
     SB = spawn_link(fun() -> cbridge(undefined) end),
     CB = spawn_link(fun() -> cbridge(undefined) end),
+    {ok, AdvSrv} = erlmcp_server:start_link(#{
+        name => <<"t">>, version => <<"1.0">>
+    }),
+    Resp = erlmcp_reply:new_device(SB),
     {ok, S} = erlmcp_server_session:start_link(#{
-        transport => SB, name => <<"t">>, version => <<"1.0">>,
-        capabilities => #{}
+        server => AdvSrv, responder => Resp,
+        name => <<"t">>, version => <<"1.0">>
     }),
     {ok, C} = erlmcp_client_session:start_link(#{
         transport => CB, owner => self(),
@@ -778,12 +794,12 @@ cs_capability_advertisement(_) ->
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
-    erlmcp_client_session:stop(C), gen_statem:stop(S),
+    erlmcp_client_session:stop(C), gen_statem:stop(S), gen_server:stop(AdvSrv),
     pass.
 
 cs_inbound_unknown(_) ->
-    {S, C} = setup_client_pair(),
-    ok = erlmcp:add_tool(S, #{
+    {Srv, _Sess, C} = setup_client_pair(),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"u">>, description => <<"U">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->
@@ -852,7 +868,7 @@ ts_stdio_validate(_) ->
 
 ts_stdio_delivery(_) ->
     {ok, S} = erlmcp_server_session:start_link(#{
-        name => <<"t">>, version => <<"1.0">>, capabilities => #{}}),
+        name => <<"t">>, version => <<"1.0">>}),
     {ok, Pid} = erlmcp_transport_stdio:start_link(test, #{
         session => S, test_mode => true}),
     Init = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
@@ -911,9 +927,11 @@ ts_http_validate(_) ->
 %% Helpers
 %%====================================================================
 
-send_req(Server, Id, Method, Params) ->
+send_req(#{session := Session}, Id, Method, Params) ->
+    send_req(Session, Id, Method, Params);
+send_req(Session, Id, Method, Params) when is_pid(Session) ->
     Req = erlmcp_json_rpc:encode_request(Id, Method, Params),
-    erlmcp_server_session:send_message(Server, Req),
+    erlmcp_server_session:send_message(Session, Req),
     decode(wait_send()).
 
 decode(Json) ->

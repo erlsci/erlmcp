@@ -7,16 +7,32 @@
 %%====================================================================
 
 setup() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
+    {ok, Server} = erlmcp_server:start_link(#{
         name => <<"test-server">>, version => <<"1.0">>,
-        capabilities => #{}
+        handler => example_calculator_handler
     }),
-    ok = erlmcp:register_handler(Server, example_calculator_handler),
     ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
     Server.
 
+setup_session() ->
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"test">>, version => <<"1.0">>,
+        handler => example_calculator_handler
+    }),
+    ok = erlmcp:add_tool(Srv, erlmcp:make_directory_tool()),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    {Srv, Session}.
+
 teardown(Server) ->
-    gen_statem:stop(Server).
+    gen_server:stop(Server).
+
+teardown_session({Srv, Session}) ->
+    catch gen_statem:stop(Session),
+    catch gen_server:stop(Srv).
 
 %%====================================================================
 %% DISC-1: Every tool has non-empty category and when_to_use
@@ -93,14 +109,7 @@ bfs([Node | Queue], NextMap, Visited) ->
 %%====================================================================
 
 test_surfaces_share_source_test() ->
-    Transport = self(),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => Transport,
-        name => <<"test">>, version => <<"1.0">>,
-        capabilities => #{}
-    }),
-    ok = erlmcp:register_handler(Server, example_calculator_handler),
-    ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
+    {_Srv, Server} = setup_session(),
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
@@ -129,13 +138,7 @@ test_surfaces_share_source_test() ->
 %%====================================================================
 
 test_meta_key_namespace_test() ->
-    Transport = self(),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => Transport,
-        name => <<"test">>, version => <<"1.0">>,
-        capabilities => #{}
-    }),
-    ok = erlmcp:register_handler(Server, example_calculator_handler),
+    {_DSrv, Server} = setup_session(),
     init_session(Server),
     ListReq = erlmcp_json_rpc:encode_request(2, <<"tools/list">>, #{}),
     erlmcp_server_session:send_message(Server, ListReq),
@@ -166,13 +169,7 @@ test_meta_key_namespace_test() ->
 %%====================================================================
 
 test_directory_covers_all_tools_test() ->
-    Transport = self(),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => Transport,
-        name => <<"test">>, version => <<"1.0">>,
-        capabilities => #{}
-    }),
-    ok = erlmcp:register_handler(Server, example_calculator_handler),
+    {_DSrv, Server} = setup_session(),
     ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
     init_session(Server),
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
@@ -191,28 +188,18 @@ test_directory_covers_all_tools_test() ->
     gen_statem:stop(Server).
 
 test_directory_excluded_from_conformance_test() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
-    }),
-    ok = erlmcp:register_handler(Server, example_calculator_handler),
-    ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
+    Server = setup(),
     ConformanceTools = erlmcp:conformance_tools(Server),
     Names = [maps:get(name, T) || T <- ConformanceTools],
     ?assertNot(lists:member(<<"directory">>, Names)),
-    gen_statem:stop(Server).
+    teardown(Server).
 
 %%====================================================================
 %% DISC-7: Behavioral hints in annotations, not in _meta
 %%====================================================================
 
 test_no_behavioral_keys_in_meta_test() ->
-    Transport = self(),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => Transport,
-        name => <<"test">>, version => <<"1.0">>,
-        capabilities => #{}
-    }),
-    ok = erlmcp:register_handler(Server, example_calculator_handler),
+    {_DSrv, Server} = setup_session(),
     init_session(Server),
     ListReq = erlmcp_json_rpc:encode_request(2, <<"tools/list">>, #{}),
     erlmcp_server_session:send_message(Server, ListReq),
@@ -238,13 +225,7 @@ test_no_behavioral_keys_in_meta_test() ->
 %%====================================================================
 
 test_instructions_no_tool_enumeration_test() ->
-    Transport = self(),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => Transport,
-        name => <<"test">>, version => <<"1.0">>,
-        capabilities => #{}
-    }),
-    ok = erlmcp:register_handler(Server, example_calculator_handler),
+    {_DSrv, Server} = setup_session(),
     ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
     init_session(Server),
     Instructions = erlmcp_server_session:get_instructions(Server),
@@ -276,13 +257,7 @@ test_instructions_no_tool_enumeration_test() ->
 %%====================================================================
 
 test_runtime_change_reflected_test() ->
-    Transport = self(),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => Transport,
-        name => <<"test">>, version => <<"1.0">>,
-        capabilities => #{}
-    }),
-    ok = erlmcp:register_handler(Server, example_calculator_handler),
+    {_DSrv, Server} = setup_session(),
     ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
     init_session(Server),
     ok = erlmcp:add_tool(Server, #{

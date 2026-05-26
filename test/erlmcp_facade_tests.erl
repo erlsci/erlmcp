@@ -7,7 +7,7 @@
 %%====================================================================
 
 add_tool_test() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
+    {ok, Server} = erlmcp_server:start_link(#{
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     Schema = erlmcp_schema:object([
@@ -18,12 +18,12 @@ add_tool_test() ->
         input_schema => Schema,
         handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
     }),
-    [Tool] = erlmcp_server_session:list_tools(Server),
+    [Tool] = maps:values(erlmcp_server:get_tools(erlmcp_server:catalog_table(Server))),
     ?assertEqual(<<"t">>, maps:get(name, Tool)),
-    gen_statem:stop(Server).
+    gen_server:stop(Server).
 
 remove_tool_test() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
+    {ok, Server} = erlmcp_server:start_link(#{
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     ok = erlmcp:add_tool(Server, #{
@@ -32,17 +32,17 @@ remove_tool_test() ->
         handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
     }),
     ok = erlmcp:remove_tool(Server, <<"t">>),
-    ?assertEqual([], erlmcp_server_session:list_tools(Server)),
-    gen_statem:stop(Server).
+    ?assertEqual([], maps:values(erlmcp_server:get_tools(erlmcp_server:catalog_table(Server)))),
+    gen_server:stop(Server).
 
 register_handler_test() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
+    {ok, Server} = erlmcp_server:start_link(#{
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     ok = erlmcp:register_handler(Server, test_calc_handler),
-    Tools = erlmcp_server_session:list_tools(Server),
+    Tools = maps:values(erlmcp_server:get_tools(erlmcp_server:catalog_table(Server))),
     ?assert(length(Tools) > 0),
-    gen_statem:stop(Server).
+    gen_server:stop(Server).
 
 %%====================================================================
 %% Content constructors
@@ -85,7 +85,7 @@ make_directory_tool_test() ->
     ?assert(maps:get(is_directory, T)).
 
 conformance_tools_excludes_directory_test() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
+    {ok, Server} = erlmcp_server:start_link(#{
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
@@ -98,7 +98,7 @@ conformance_tools_excludes_directory_test() ->
     Names = [maps:get(name, T) || T <- CTools],
     ?assert(lists:member(<<"t">>, Names)),
     ?assertNot(lists:member(<<"directory">>, Names)),
-    gen_statem:stop(Server).
+    gen_server:stop(Server).
 
 %%====================================================================
 %% Server management (existing functional code)
@@ -107,12 +107,12 @@ conformance_tools_excludes_directory_test() ->
 start_stop_server_test() ->
     {ok, Pid} = erlmcp:start_server(test_srv),
     ?assert(is_process_alive(Pid)),
-    gen_statem:stop(Pid).
+    gen_server:stop(Pid).
 
 start_server_with_config_test() ->
     {ok, Pid} = erlmcp:start_server(test_srv2, #{version => <<"2.0">>}),
     ?assert(is_process_alive(Pid)),
-    gen_statem:stop(Pid).
+    gen_server:stop(Pid).
 
 list_servers_no_registry_test() ->
     ?assertEqual([], erlmcp:list_servers()).
@@ -143,7 +143,7 @@ start_transport_unsupported_test() ->
 %%====================================================================
 
 add_resource_test() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
+    {ok, Server} = erlmcp_server:start_link(#{
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     ok = erlmcp:add_resource(Server, #{
@@ -151,14 +151,14 @@ add_resource_test() ->
         name => <<"Test A">>,
         handler => fun(_Ctx) -> {ok, #{<<"uri">> => <<"test://a">>, <<"text">> => <<"hello">>}} end
     }),
-    [R] = erlmcp_server_session:list_resources(Server),
+    [R] = maps:values(erlmcp_server:get_resources(erlmcp_server:catalog_table(Server))),
     ?assertEqual(<<"test://a">>, maps:get(uri, R)),
     ok = erlmcp:remove_resource(Server, <<"test://a">>),
-    ?assertEqual([], erlmcp_server_session:list_resources(Server)),
-    gen_statem:stop(Server).
+    ?assertEqual([], maps:values(erlmcp_server:get_resources(erlmcp_server:catalog_table(Server)))),
+    gen_server:stop(Server).
 
 add_resource_template_test() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
+    {ok, Server} = erlmcp_server:start_link(#{
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     ok = erlmcp:add_resource_template(Server, #{
@@ -166,18 +166,18 @@ add_resource_template_test() ->
         name => <<"Test">>,
         handler => fun(_Params, _Ctx) -> {ok, #{<<"uri">> => <<"test://1">>, <<"text">> => <<"ok">>}} end
     }),
-    [T] = erlmcp_server_session:list_resource_templates(Server),
+    [T] = maps:values(erlmcp_server:get_resource_templates(erlmcp_server:catalog_table(Server))),
     ?assertEqual(<<"test://{id}">>, maps:get(uri_template, T)),
     ok = erlmcp:remove_resource_template(Server, <<"test://{id}">>),
-    ?assertEqual([], erlmcp_server_session:list_resource_templates(Server)),
-    gen_statem:stop(Server).
+    ?assertEqual([], maps:values(erlmcp_server:get_resource_templates(erlmcp_server:catalog_table(Server)))),
+    gen_server:stop(Server).
 
 %%====================================================================
 %% Prompts (M2b)
 %%====================================================================
 
 add_prompt_test() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
+    {ok, Server} = erlmcp_server:start_link(#{
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     ok = erlmcp:add_prompt(Server, #{
@@ -189,30 +189,34 @@ add_prompt_test() ->
                 #{<<"type">> => <<"text">>, <<"text">> => <<"Hello ", N/binary>>}}]}
         end
     }),
-    [P] = erlmcp_server_session:list_prompts(Server),
+    [P] = maps:values(erlmcp_server:get_prompts(erlmcp_server:catalog_table(Server))),
     ?assertEqual(<<"greet">>, maps:get(name, P)),
     ok = erlmcp:remove_prompt(Server, <<"greet">>),
-    ?assertEqual([], erlmcp_server_session:list_prompts(Server)),
-    gen_statem:stop(Server).
+    ?assertEqual([], maps:values(erlmcp_server:get_prompts(erlmcp_server:catalog_table(Server)))),
+    gen_server:stop(Server).
 
 %%====================================================================
 %% Logging (M2b)
 %%====================================================================
 
 log_message_test() ->
-    Transport = self(),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => Transport,
-        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"test">>, version => <<"1.0">>
     }),
-    init_server_with_transport(Server),
-    ok = erlmcp_server_session:set_log_level(Server, info),
-    erlmcp:log_message(Server, info, <<"test">>, <<"hello">>),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    init_server_with_transport(Session),
+    ok = erlmcp_server_session:set_log_level(Session, info),
+    erlmcp:log_message(Session, info, <<"test">>, <<"hello">>),
     Notif = decode_resp(wait_transport_send()),
     ?assertEqual(<<"notifications/message">>, maps:get(<<"method">>, Notif)),
     Params = maps:get(<<"params">>, Notif),
     ?assertEqual(<<"info">>, maps:get(<<"level">>, Params)),
-    gen_statem:stop(Server).
+    gen_statem:stop(Session),
+    gen_server:stop(Srv).
 
 %%====================================================================
 %% Facade transport/server management (via app)
@@ -278,14 +282,14 @@ start_stop_transport_stdio_test() ->
     erlmcp_transport_stdio:close(Pid).
 
 notify_resource_updated_test() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
+    {ok, Server} = erlmcp_server:start_link(#{
         transport => self(),
         name => <<"test">>, version => <<"1.0">>, capabilities => #{}
     }),
     erlmcp:notify_resource_updated(Server, <<"test://x">>),
     timer:sleep(50),
     ?assert(is_process_alive(Server)),
-    gen_statem:stop(Server).
+    gen_server:stop(Server).
 
 start_stdio_setup_test() ->
     {ok, #{server := Server, transport := Transport}} =
@@ -293,7 +297,7 @@ start_stdio_setup_test() ->
     ?assert(is_process_alive(Server)),
     ?assert(is_process_alive(Transport)),
     erlmcp_transport_stdio:close(Transport),
-    gen_statem:stop(Server).
+    gen_server:stop(Server).
 
 stop_server_dead_process_test() ->
     {ok, _} = application:ensure_all_started(erlmcp),
@@ -338,7 +342,7 @@ start_http_setup_test() ->
     ?assert(is_process_alive(Server)),
     ?assert(is_process_alive(Transport)),
     erlmcp_transport_streamable_http:close(Transport),
-    gen_statem:stop(Server).
+    gen_server:stop(Server).
 
 init_server_with_transport(Server) ->
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
