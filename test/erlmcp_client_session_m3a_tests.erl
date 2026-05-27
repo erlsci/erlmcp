@@ -677,3 +677,65 @@ ping_error_test() ->
     ok = erlmcp_client_session:ping(Client),
     erlmcp_client_session:stop(Client),
     gen_statem:stop(Server).
+
+%%====================================================================
+%% Task client API (covers erlmcp_client_session lines 187-202)
+%%====================================================================
+
+client_list_tasks_test() ->
+    {ok, _} = application:ensure_all_started(erlmcp),
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"task-test">>, version => <<"1.0">>,
+        handler => example_calculator_handler,
+        tools => [#{name => <<"task_tool">>, description => <<"Task tool">>,
+                    input_schema => erlmcp_schema:object([]),
+                    task_support => enabled,
+                    handler => fun(_, _) -> timer:sleep(50), {ok, erlmcp:text(<<"done">>)} end}]
+    }),
+    Responder = erlmcp_reply:new_device(SBridge),
+    {ok, _Server} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"task-test">>, version => <<"1.0">>
+    }),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => CBridge, owner => self(),
+        name => <<"task-client">>, version => <<"1.0">>
+    }),
+    SBridge ! {peer, Client},
+    CBridge ! {peer, _Server},
+    {ok, _} = erlmcp_client_session:initialize(Client, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    {ok, CallResult} = erlmcp_client_session:call_tool(Client, <<"task_tool">>,
+        #{}, #{task => true}),
+    TaskId = maps:get(<<"taskId">>, CallResult),
+    {ok, _TaskList} = erlmcp_client_session:list_tasks(Client),
+    {ok, _Status} = erlmcp_client_session:get_task(Client, TaskId),
+    timer:sleep(100),
+    case erlmcp_client_session:get_task_result(Client, TaskId) of
+        {ok, _} -> ok;
+        {error, _} -> ok
+    end,
+    ok = erlmcp_client_session:cancel_task(Client, TaskId),
+    erlmcp_client_session:stop(Client).
+
+%% Client request before initialize returns error (covers line 649)
+client_not_initialized_error_test() ->
+    SBridge = spawn_link(fun() -> bridge(undefined) end),
+    CBridge = spawn_link(fun() -> bridge(undefined) end),
+    Responder = erlmcp_reply:new_device(SBridge),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        responder => Responder, name => <<"t">>, version => <<"1.0">>
+    }),
+    {ok, Client} = erlmcp_client_session:start_link(#{
+        transport => CBridge, owner => self(),
+        name => <<"t">>, version => <<"1.0">>
+    }),
+    SBridge ! {peer, Client},
+    CBridge ! {peer, Server},
+    ?assertEqual({error, not_initialized}, erlmcp_client_session:list_tools(Client)),
+    erlmcp_client_session:stop(Client),
+    gen_statem:stop(Server).
