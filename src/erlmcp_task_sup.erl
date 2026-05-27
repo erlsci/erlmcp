@@ -11,7 +11,11 @@ start_link() ->
 
 -spec start_task(map()) -> {ok, pid()} | {error, term()}.
 start_task(Opts) when is_map(Opts) ->
-    supervisor:start_child(?MODULE, [Opts]).
+    case supervisor:start_child(?MODULE, [Opts]) of
+        {ok, Pid} -> {ok, Pid};
+        {ok, Pid, _Info} -> {ok, Pid};
+        Error -> Error
+    end.
 
 -spec init([]) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->

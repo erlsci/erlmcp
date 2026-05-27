@@ -27,7 +27,11 @@ start_child(TransportId, Type, Config) ->
           shutdown => 5000,
           type => worker,
           modules => [Module]},
-    supervisor:start_child(?MODULE, ChildSpec).
+    case supervisor:start_child(?MODULE, ChildSpec) of
+        {ok, Pid} -> {ok, Pid};
+        {ok, Pid, _Info} -> {ok, Pid};
+        Error -> Error
+    end.
 
 %%====================================================================
 %% supervisor callbacks
