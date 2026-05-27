@@ -45,11 +45,11 @@
 %% Server management
 %%====================================================================
 
--spec start_server(server_id()) -> {ok, pid()} | {error, term()}.
+-spec start_server(server_id()) -> {ok, erlmcp_server:server()} | {error, term()}.
 start_server(ServerId) ->
     start_server(ServerId, #{}).
 
--spec start_server(server_id(), map()) -> {ok, pid()} | {error, term()}.
+-spec start_server(server_id(), map()) -> {ok, erlmcp_server:server()} | {error, term()}.
 start_server(ServerId, Config) ->
     Opts = Config#{name => atom_to_binary(ServerId, utf8)},
     erlmcp_server:start_link(Opts).
@@ -138,15 +138,15 @@ unbind_transport(TransportId) ->
 %% Tool API (M2a)
 %%====================================================================
 
--spec add_tool(pid(), tool_spec()) -> ok | {error, term()}.
+-spec add_tool(erlmcp_server:server(), tool_spec()) -> ok | {error, term()}.
 add_tool(Server, ToolSpec) when is_pid(Server), is_map(ToolSpec) ->
     erlmcp_server:register_tool(Server, ToolSpec).
 
--spec remove_tool(pid(), binary()) -> ok.
+-spec remove_tool(erlmcp_server:server(), binary()) -> ok.
 remove_tool(Server, ToolName) when is_pid(Server), is_binary(ToolName) ->
     erlmcp_server:unregister_tool(Server, ToolName).
 
--spec register_handler(pid(), module()) -> ok.
+-spec register_handler(erlmcp_server:server(), module()) -> ok.
 register_handler(Server, Module) when is_pid(Server), is_atom(Module) ->
     erlmcp_server:register_handler(Server, Module).
 
@@ -190,7 +190,7 @@ make_directory_tool() ->
         handler => fun directory_handler/2
     }.
 
--spec conformance_tools(pid()) -> [tool_spec()].
+-spec conformance_tools(erlmcp_server:server()) -> [tool_spec()].
 conformance_tools(Server) ->
     Tab = erlmcp_server:catalog_table(Server),
     AllTools = maps:values(erlmcp_server:get_tools(Tab)),
@@ -228,19 +228,19 @@ group_by_category(Tools) ->
 %% Resources (M2b)
 %%====================================================================
 
--spec add_resource(pid(), resource_spec()) -> ok.
+-spec add_resource(erlmcp_server:server(), resource_spec()) -> ok.
 add_resource(Server, Spec) when is_pid(Server), is_map(Spec) ->
     erlmcp_server:register_resource(Server, Spec).
 
--spec remove_resource(pid(), binary()) -> ok.
+-spec remove_resource(erlmcp_server:server(), binary()) -> ok.
 remove_resource(Server, Uri) when is_pid(Server), is_binary(Uri) ->
     erlmcp_server:unregister_resource(Server, Uri).
 
--spec add_resource_template(pid(), resource_spec()) -> ok.
+-spec add_resource_template(erlmcp_server:server(), resource_spec()) -> ok.
 add_resource_template(Server, Spec) when is_pid(Server), is_map(Spec) ->
     erlmcp_server:register_resource_template(Server, Spec).
 
--spec remove_resource_template(pid(), binary()) -> ok.
+-spec remove_resource_template(erlmcp_server:server(), binary()) -> ok.
 remove_resource_template(Server, UriTemplate) when is_pid(Server), is_binary(UriTemplate) ->
     erlmcp_server:unregister_resource_template(Server, UriTemplate).
 
@@ -252,11 +252,11 @@ notify_resource_updated(Session, Uri) when is_pid(Session), is_binary(Uri) ->
 %% Prompts (M2b)
 %%====================================================================
 
--spec add_prompt(pid(), prompt_spec()) -> ok.
+-spec add_prompt(erlmcp_server:server(), prompt_spec()) -> ok.
 add_prompt(Server, Spec) when is_pid(Server), is_map(Spec) ->
     erlmcp_server:register_prompt(Server, Spec).
 
--spec remove_prompt(pid(), binary()) -> ok.
+-spec remove_prompt(erlmcp_server:server(), binary()) -> ok.
 remove_prompt(Server, Name) when is_pid(Server), is_binary(Name) ->
     erlmcp_server:unregister_prompt(Server, Name).
 
