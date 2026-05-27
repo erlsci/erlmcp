@@ -25,23 +25,18 @@ jobs:
         rebar3-version: ${{ matrix.otp_version >= 26 && '3.25' || '3.22' }}
     - name: Check rebar3 Version
       run: rebar3 --version
-    - name: Compile
-      run: rebar3 compile
-    - name: Xref Checks
-      run: rebar3 xref
 
+    # These steps call the same make targets a developer runs locally, so a
+    # green `make check` should mean green CI. Together they compose `make check`
+    # (minus `clean`, which is unneeded on a fresh checkout). Keep this list in
+    # sync with the `check` target in the Makefile.
+    - name: Compile
+      run: make compile
+    - name: Xref
+      run: make xref
     - name: Compile Examples
-      run: |
-        rebar3 as simple compile
-        rebar3 as calculator compile
-        rebar3 as weather compile
-    - name: EUnit Tests
-      run: rebar3 eunit -v
-    - name: Common Test
-      run: rebar3 ct -v
-    - name: PropEr Tests
-      run: rebar3 proper -c
+      run: make compile-examples
     - name: Dialyzer
-      run: rebar3 dialyzer
-    - name: Test Coverage
-      run: rebar3 as test cover -v --min_coverage=90
+      run: make dialyzer
+    - name: Tests + Coverage (eunit, ct, proper, cover >=90%)
+      run: make test

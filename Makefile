@@ -1,4 +1,4 @@
-.PHONY: all compile clean test dialyzer xref format lint docs console release docker check
+.PHONY: all compile compile-examples clean test dialyzer xref format lint docs console release docker check
 
 REBAR := rebar3
 APP_NAME := erlmcp
@@ -9,16 +9,28 @@ all: compile
 compile:
 	@$(REBAR) compile
 
+# Compile the bundled example servers (their own rebar3 profiles).
+# CI compiles these; keeping it here means `make check` catches example
+# breakage (e.g. examples referencing changed core API) before a push.
+compile-examples:
+	@$(REBAR) as simple compile
+	@$(REBAR) as calculator compile
+	@$(REBAR) as weather compile
+
 clean:
 	@$(REBAR) cleanplus
 	@rm -rf _build logs erl_crash.dump
 
+# eunit/ct/proper run in the `test` profile and write coverdata to
+# _build/test/cover; the cover gate MUST run `as test` to read that same
+# coverdata (bare `rebar3 cover` runs in the default profile). Flags here
+# match CI exactly so local and CI never diverge.
 test:
 	@mkdir -p logs
-	@$(REBAR) eunit
-	@$(REBAR) ct
+	@$(REBAR) eunit -v
+	@$(REBAR) ct -v
 	@$(REBAR) proper -c
-	@$(REBAR) cover --min_coverage=90
+	@$(REBAR) as test cover -v --min_coverage=90
 
 dialyzer:
 	@$(REBAR) dialyzer
@@ -38,7 +50,11 @@ console:
 release:
 	@$(REBAR) as prod release
 
-check: clean compile xref dialyzer test
+# The single source of truth for "is the build green?". CI runs these same
+# targets (see .github/workflows/ci.yml) across the OTP 25–28 matrix, so a
+# green `make check` locally should mean a green CI. Keep this target and the
+# CI job's target list in sync.
+check: clean compile xref compile-examples dialyzer test
 	@echo "All checks passed!"
 
 # Development helpers
