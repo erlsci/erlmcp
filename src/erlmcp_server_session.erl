@@ -14,7 +14,7 @@
 
 -record(data, {
     server_ref :: ets:tid(),
-    server_pid :: pid() | undefined,
+    server_pid :: erlmcp_server:server() | undefined,
     responder :: erlmcp_reply:responder() | undefined,
     server_info :: erlmcp_model:peer_info(),
     capabilities :: map(),

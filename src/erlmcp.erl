@@ -45,11 +45,11 @@
 %% Server management
 %%====================================================================
 
--spec start_server(server_id()) -> {ok, erlmcp_server:server()} | {error, term()}.
+-spec start_server(server_id()) -> {ok, erlmcp_server:server()} | {error, term()} | ignore.
 start_server(ServerId) ->
     start_server(ServerId, #{}).
 
--spec start_server(server_id(), map()) -> {ok, erlmcp_server:server()} | {error, term()}.
+-spec start_server(server_id(), map()) -> {ok, erlmcp_server:server()} | {error, term()} | ignore.
 start_server(ServerId, Config) ->
     Opts = Config#{name => atom_to_binary(ServerId, utf8)},
     erlmcp_server:start_link(Opts).
@@ -84,12 +84,12 @@ list_servers() ->
 %%====================================================================
 
 -spec start_transport(transport_id(), transport_type()) ->
-    {ok, pid()} | {error, term()}.
+    gen_server:start_ret() | {error, term()}.
 start_transport(TransportId, Type) ->
     start_transport(TransportId, Type, #{}).
 
 -spec start_transport(transport_id(), transport_type(), map()) ->
-    {ok, pid()} | {error, term()}.
+    gen_server:start_ret() | {error, term()}.
 start_transport(TransportId, stdio, Config) ->
     erlmcp_transport_stdio:start_link(TransportId, Config);
 start_transport(_TransportId, Type, _Config) ->
@@ -272,7 +272,7 @@ log_message(Session, Level, Logger, Data) when is_pid(Session), is_atom(Level) -
 %% Convenience setup (M4)
 %%====================================================================
 
--spec start_stdio_setup(atom(), map()) -> {ok, #{server := pid(), session := pid(), transport := pid()}}.
+-spec start_stdio_setup(atom(), map()) -> {ok, #{server := erlmcp_server:server(), session := pid(), transport := pid()}}.
 start_stdio_setup(ServerId, Config) when is_atom(ServerId) ->
     {ok, Server} = start_server(ServerId, Config),
     Responder = maps:get(responder, Config, undefined),
@@ -285,7 +285,7 @@ start_stdio_setup(ServerId, Config) when is_atom(ServerId) ->
     {ok, #{server => Server, session => Session, transport => Transport}}.
 
 -spec start_tcp_setup(atom(), map(), map()) ->
-    {ok, #{server := pid(), session := pid(), transport := pid()}}.
+    {ok, #{server := erlmcp_server:server(), session := pid(), transport := pid(), transport_id := atom()}}.
 start_tcp_setup(ServerId, ServerConfig, TcpConfig) when is_atom(ServerId) ->
     {ok, Server} = start_server(ServerId, ServerConfig),
     {ok, Session} = erlmcp_server_session:start_link(
@@ -297,7 +297,7 @@ start_tcp_setup(ServerId, ServerConfig, TcpConfig) when is_atom(ServerId) ->
            transport => Transport, transport_id => TransId}}.
 
 -spec start_http_setup(atom(), map(), map()) ->
-    {ok, #{server := pid(), session := pid(), transport := pid()}}.
+    {ok, #{server := erlmcp_server:server(), session := pid(), transport := pid(), transport_id := atom()}}.
 start_http_setup(ServerId, ServerConfig, HttpConfig) when is_atom(ServerId) ->
     {ok, Server} = start_server(ServerId, ServerConfig),
     {ok, Session} = erlmcp_server_session:start_link(

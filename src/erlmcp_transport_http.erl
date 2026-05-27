@@ -398,8 +398,8 @@ retry_request(RequestId, Data, _Attempts, State) ->
 -spec calculate_retry_delay(non_neg_integer(), state()) -> pos_integer().
 calculate_retry_delay(Attempts, State) ->
     BaseDelay = maps:get(retry_delay, State),
-    %% Exponential backoff with jitter
-    Backoff = BaseDelay * (1 bsl (Attempts - 1)),
-    MaxDelay = 60000,  % 1 minute max
+    Shift = max(0, Attempts - 1),
+    Backoff = BaseDelay * (1 bsl Shift),
+    MaxDelay = 60000,
     Jitter = rand:uniform(1000),
-    min(Backoff + Jitter, MaxDelay).
+    round(erlang:min(Backoff + Jitter, MaxDelay)).

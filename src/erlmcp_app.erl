@@ -6,7 +6,11 @@
 
 -spec start(application:start_type(), term()) -> {ok, pid()} | {error, term()}.
 start(_StartType, _StartArgs) ->
-    erlmcp_sup:start_link().
+    case erlmcp_sup:start_link() of
+        {ok, Pid} -> {ok, Pid};
+        {error, _} = Err -> Err;
+        ignore -> {error, supervisor_ignored}
+    end.
 
 -spec stop(term()) -> ok.
 stop(_State) ->
