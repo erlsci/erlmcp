@@ -77,7 +77,6 @@ bridge(Peer) ->
 %%====================================================================
 
 sampling_end_to_end(Config) ->
-    Server = ?config(server, Config),
     Srv = ?config(srv, Config),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"ask_llm">>,
@@ -110,7 +109,6 @@ sampling_end_to_end(Config) ->
 %%====================================================================
 
 roots_list(Config) ->
-    Server = ?config(server, Config),
     Srv = ?config(srv, Config),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"get_roots">>,
@@ -142,7 +140,6 @@ roots_list_changed(Config) ->
 %%====================================================================
 
 elicitation_end_to_end(Config) ->
-    Server = ?config(server, Config),
     Srv = ?config(srv, Config),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"confirm">>,
@@ -198,7 +195,6 @@ capability_advertisement(_Config) ->
 %%====================================================================
 
 inbound_unknown_method(Config) ->
-    Server = ?config(server, Config),
     Srv = ?config(srv, Config),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"bad_method">>,
@@ -227,7 +223,6 @@ inbound_unknown_method(Config) ->
 %%====================================================================
 
 inbound_validation_failure(Config) ->
-    Server = ?config(server, Config),
     Srv = ?config(srv, Config),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"bad_sampling">>,
@@ -318,7 +313,6 @@ callback_crash_isolation(Config) ->
 %%====================================================================
 
 server_peer_request_from_tool(Config) ->
-    Server = ?config(server, Config),
     Srv = ?config(srv, Config),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"peer_test">>,

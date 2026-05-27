@@ -249,7 +249,6 @@ cancellation(Config) ->
 %%====================================================================
 
 list_changed_notification(Config) ->
-    Server = ?config(server, Config),
     Srv = ?config(srv, Config),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"tmp_tool">>,
