@@ -156,3 +156,13 @@ session) and the SUITE. The red is stale-API churn in the **old**
 cases into the SUITE, delete it, then close P6M1-14/17/18/19. Brief:
 `docs/0.6.0/prompts/phase6-m1-iteration4-test-consolidation-cc-prompt.md`. This is
 iteration 4 of 5.
+
+**Iteration 5 (closeout, 2026-05-25):** iter-4 landed clean — `erlmcp_session_tests`
+retired (2 unique cases folded into the SUITE, 46 dropped as redundant), gate
+aligned with CI, `cover_excl_mods=[]`, total 93%, spine modules ≥90%, all 19 rows
+walked. **One gap:** `erlmcp_client_session` at 88% < the 90% floor; CC's "re-entry
+P6-M2" deferral was invalid (P6-M2 = stdio, never touches the client). Decision
+(Duncan): **close the 2% now**, no deferral. Brief:
+`docs/0.6.0/prompts/phase6-m1-iteration5-closeout-cc-prompt.md`. iteration 5 of 5 —
+the cap. Close = `client_session` ≥90% (or a named-line ceiling) + CI green on the
+pushed branch.
