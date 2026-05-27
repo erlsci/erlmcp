@@ -11,26 +11,19 @@
 
 -behaviour(erlmcp_server_handler).
 
--export([start/0, start/1, stop/1, slow_tool_spec/0, explain_tool_spec/0]).
+-export([start/0, start/1, slow_tool_spec/0, explain_tool_spec/0]).
 -export([tools/0, handle_tool/3]).
 
--spec start() -> {ok, #{server := pid(), transport := pid()}}.
+-spec start() -> {ok, pid()} | {error, term()}.
 start() ->
     start(#{}).
 
--spec start(map()) -> {ok, #{server := pid(), transport := pid()}}.
+-spec start(map()) -> {ok, pid()} | {error, term()}.
 start(Config) ->
-    {ok, #{server := Server} = Result} =
-        erlmcp:start_stdio_setup(calculator, Config),
-    ok = erlmcp:register_handler(Server, ?MODULE),
-    ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
-    ok = erlmcp:add_tool(Server, slow_tool_spec()),
-    ok = erlmcp:add_tool(Server, explain_tool_spec()),
-    {ok, Result}.
-
--spec stop(pid()) -> ok.
-stop(Server) ->
-    gen_statem:stop(Server).
+    erlmcp:start_stdio_setup(calculator, Config#{
+        handler => ?MODULE,
+        tools => [erlmcp:make_directory_tool(), slow_tool_spec(), explain_tool_spec()]
+    }).
 
 %%====================================================================
 %% erlmcp_server_handler callbacks

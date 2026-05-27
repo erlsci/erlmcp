@@ -8,34 +8,23 @@
 %%   - Discoverability (full wayfinding, directory tool)
 %%   - Multiple transports (stdio + tcp)
 
--export([start_stdio/0, start_stdio/1, start_tcp/2, stop/1]).
--export([register_all/1]).
+-export([start_stdio/0, start_stdio/1, register_all/1]).
 
 -define(CITIES, [<<"london">>, <<"paris">>, <<"tokyo">>, <<"new_york">>]).
 
--spec start_stdio() -> {ok, #{server := pid(), transport := pid()}}.
+-spec start_stdio() -> {ok, pid()} | {error, term()}.
 start_stdio() ->
     start_stdio(#{}).
 
--spec start_stdio(map()) -> {ok, #{server := pid(), transport := pid()}}.
+-spec start_stdio(map()) -> {ok, pid()} | {error, term()}.
 start_stdio(Config) ->
-    {ok, #{server := Server} = Result} =
-        erlmcp:start_stdio_setup(weather, Config),
-    register_all(Server),
-    {ok, Result}.
+    erlmcp:start_stdio_setup(weather, Config#{
+        tools => tools(),
+        resources => resources(),
+        prompts => prompts()
+    }).
 
--spec start_tcp(inet:hostname(), inet:port_number()) ->
-    {ok, #{server := pid(), transport := pid()}}.
-start_tcp(Host, Port) ->
-    {ok, #{server := Server} = Result} =
-        erlmcp:start_tcp_setup(weather, #{}, #{host => Host, port => Port}),
-    register_all(Server),
-    {ok, Result}.
-
--spec stop(pid()) -> ok.
-stop(Server) ->
-    gen_statem:stop(Server).
-
+%% For test use — registers on an existing server
 -spec register_all(pid()) -> ok.
 register_all(Server) ->
     ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
@@ -44,12 +33,24 @@ register_all(Server) ->
     register_prompts(Server),
     ok.
 
+tools() ->
+    [erlmcp:make_directory_tool() | weather_tools()].
+
+resources() ->
+    weather_resources().
+
+prompts() ->
+    weather_prompts().
+
 %%====================================================================
 %% Tools — full discoverability wayfinding
 %%====================================================================
 
 register_tools(Server) ->
-    ok = erlmcp:add_tool(Server, #{
+    lists:foreach(fun(T) -> ok = erlmcp:add_tool(Server, T) end, weather_tools()).
+
+weather_tools() ->
+    [#{
         name => <<"get_weather">>,
         description => <<"Get current weather for a city">>,
         input_schema => erlmcp_schema:object([
@@ -66,9 +67,8 @@ register_tools(Server) ->
         handler => fun(#{<<"city">> := City}, _Ctx) ->
             {ok, erlmcp:text(weather_text(City))}
         end
-    }),
-    ok = erlmcp:add_tool(Server, #{
-        name => <<"get_forecast">>,
+    },
+     #{name => <<"get_forecast">>,
         description => <<"Get a multi-day weather forecast for a city">>,
         input_schema => erlmcp_schema:object([
             erlmcp_schema:field(<<"city">>, erlmcp_schema:string(), [required]),
@@ -85,15 +85,18 @@ register_tools(Server) ->
         handler => fun(#{<<"city">> := City} = Args, _Ctx) ->
             Days = maps:get(<<"days">>, Args, 3),
             {ok, erlmcp:text(forecast_text(City, Days))}
-        end
-    }).
+        end}].
 
 %%====================================================================
 %% Resources — static, template, completion
 %%====================================================================
 
 register_resources(Server) ->
-    ok = erlmcp:add_resource(Server, #{
+    lists:foreach(fun(R) -> ok = erlmcp:add_resource(Server, R) end, weather_resources()),
+    ok = erlmcp:add_resource_template(Server, weather_resource_template()).
+
+weather_resources() ->
+    [#{
         uri => <<"weather://current/london">>,
         name => <<"London Weather">>,
         description => <<"Current weather for London">>,
@@ -103,9 +106,10 @@ register_resources(Server) ->
                    <<"mimeType">> => <<"application/json">>,
                    <<"text">> => <<"{\"temp\":15,\"condition\":\"cloudy\"}">>}}
         end
-    }),
-    ok = erlmcp:add_resource_template(Server, #{
-        uri_template => <<"weather://current/{city}">>,
+    }].
+
+weather_resource_template() ->
+    #{uri_template => <<"weather://current/{city}">>,
         name => <<"City Weather">>,
         description => <<"Current weather for any city">>,
         mime_type => <<"application/json">>,
@@ -120,14 +124,17 @@ register_resources(Server) ->
                 [C || C <- ?CITIES, binary:match(C, Prefix) =/= nomatch]
             end
         }
-    }).
+    }.
 
 %%====================================================================
 %% Prompts — arguments, completion
 %%====================================================================
 
 register_prompts(Server) ->
-    ok = erlmcp:add_prompt(Server, #{
+    lists:foreach(fun(P) -> ok = erlmcp:add_prompt(Server, P) end, weather_prompts()).
+
+weather_prompts() ->
+    [#{
         name => <<"weather_report">>,
         description => <<"Generate a weather report for a city">>,
         arguments => [
@@ -151,7 +158,7 @@ register_prompts(Server) ->
             end,
             <<"units">> => fun(_) -> [<<"c">>, <<"f">>] end
         }
-    }).
+    }].
 
 %%====================================================================
 %% Internal — mock weather data
