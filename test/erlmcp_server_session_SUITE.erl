@@ -54,7 +54,9 @@
     unknown_event_ignored/1,
     error_response_to_outbound/1,
     task_cancel_running/1,
-    resource_read_list_handler/1
+    resource_read_list_handler/1,
+    parse_error_returns_error_response/1,
+    cancel_nonexistent_request_no_crash/1
 ]).
 
 all() ->
@@ -106,7 +108,9 @@ all() ->
      unknown_event_ignored,
      error_response_to_outbound,
      task_cancel_running,
-     resource_read_list_handler].
+     resource_read_list_handler,
+     parse_error_returns_error_response,
+     cancel_nonexistent_request_no_crash].
 
 init_per_testcase(_TC, Config) ->
     {ok, Server} = erlmcp_server:start_link(#{
@@ -912,6 +916,26 @@ task_with_handler_module(_Config) ->
     timer:sleep(200),
     gen_statem:stop(S),
     gen_server:stop(Srv).
+
+%%====================================================================
+%% Parse errors and cancel edge cases (folded from erlmcp_session_tests)
+%%====================================================================
+
+parse_error_returns_error_response(Config) ->
+    {S, _} = start_session(Config),
+    ok = erlmcp_server_session:send_message(S, <<"not valid json">>),
+    Resp = receive_response(),
+    ?assertMatch(#{<<"error">> := #{<<"code">> := -32700}}, Resp),
+    gen_statem:stop(S).
+
+cancel_nonexistent_request_no_crash(Config) ->
+    {S, _} = start_session(Config),
+    CancelNotif = erlmcp_json_rpc:encode_notification(
+        <<"notifications/cancelled">>, #{<<"requestId">> => 99999}),
+    ok = erlmcp_server_session:send_message(S, CancelNotif),
+    timer:sleep(50),
+    ?assert(is_process_alive(S)),
+    gen_statem:stop(S).
 
 %%====================================================================
 %% Additional coverage targets

@@ -18,7 +18,7 @@ test:
 	@$(REBAR) eunit
 	@$(REBAR) ct || true
 	@$(REBAR) proper -c
-	@$(REBAR) cover
+	@$(REBAR) cover --min_coverage=90
 
 dialyzer:
 	@$(REBAR) dialyzer
