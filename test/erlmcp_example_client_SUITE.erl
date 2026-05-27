@@ -36,12 +36,13 @@ all() ->
      capability_gating].
 
 init_per_testcase(_TC, Config) ->
-    {Server, Client} = start_pair(),
-    [{server, Server}, {client, Client} | Config].
+    {Srv, Server, Client} = start_pair(),
+    [{server, Server}, {srv, Srv}, {client, Client} | Config].
 
 end_per_testcase(_TC, Config) ->
     catch erlmcp_client_session:stop(?config(client, Config)),
     catch gen_statem:stop(?config(server, Config)),
+    catch gen_server:stop(?config(srv, Config)),
     ok.
 
 %%====================================================================
@@ -51,15 +52,13 @@ end_per_testcase(_TC, Config) ->
 start_pair() ->
     SBridge = spawn_link(fun() -> bridge(undefined) end),
     CBridge = spawn_link(fun() -> bridge(undefined) end),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => SBridge,
+    {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"test-server">>, version => <<"1.0">>,
-        capabilities => #{}
+        handler => example_calculator_handler
     }),
-    ok = erlmcp:register_handler(Server, example_calculator_handler),
-    ok = erlmcp:add_tool(Server, erlmcp:make_directory_tool()),
-    ok = example_weather_handler:register_all(Server),
-    ok = erlmcp:add_tool(Server, #{
+    ok = erlmcp:add_tool(Srv, erlmcp:make_directory_tool()),
+    ok = example_weather_handler:register_all(Srv),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"slow">>,
         description => <<"Slow tool for progress/cancel testing">>,
         input_schema => erlmcp_schema:object([]),
@@ -68,6 +67,11 @@ start_pair() ->
             receive after 5000 -> ok end,
             {ok, erlmcp:text(<<"done">>)}
         end
+    }),
+    Responder = erlmcp_reply:new_device(SBridge),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"test-server">>, version => <<"1.0">>
     }),
     {ok, Client} = erlmcp_client_session:start_link(#{
         transport => CBridge,
@@ -80,7 +84,7 @@ start_pair() ->
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
-    {Server, Client}.
+    {Srv, Server, Client}.
 
 bridge(Peer) ->
     receive
@@ -246,7 +250,8 @@ cancellation(Config) ->
 
 list_changed_notification(Config) ->
     Server = ?config(server, Config),
-    ok = erlmcp:add_tool(Server, #{
+    Srv = ?config(srv, Config),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"tmp_tool">>,
         description => <<"Temporary">>,
         input_schema => erlmcp_schema:object([]),
@@ -256,7 +261,7 @@ list_changed_notification(Config) ->
         {mcp_notification, {list_changed, tools, _}} -> ok
     after 2000 -> ct:fail(no_list_changed)
     end,
-    ok = erlmcp:remove_tool(Server, <<"tmp_tool">>),
+    ok = erlmcp:remove_tool(Srv, <<"tmp_tool">>),
     receive
         {mcp_notification, {list_changed, tools, _}} -> ok
     after 2000 -> ct:fail(no_list_changed_remove)
@@ -269,10 +274,13 @@ list_changed_notification(Config) ->
 capability_gating(_Config) ->
     SBridge = spawn_link(fun() -> bridge(undefined) end),
     CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, BareSrv} = erlmcp_server:start_link(#{
+        name => <<"bare-server">>, version => <<"1.0">>
+    }),
+    BareResp = erlmcp_reply:new_device(SBridge),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => SBridge,
-        name => <<"bare-server">>, version => <<"1.0">>,
-        capabilities => #{}
+        server => BareSrv, responder => BareResp,
+        name => <<"bare-server">>, version => <<"1.0">>
     }),
     {ok, Client} = erlmcp_client_session:start_link(#{
         transport => CBridge,

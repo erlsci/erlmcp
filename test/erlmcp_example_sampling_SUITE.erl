@@ -30,10 +30,16 @@ all() ->
 init_per_testcase(_TC, Config) ->
     SBridge = spawn_link(fun() -> bridge(undefined) end),
     CBridge = spawn_link(fun() -> bridge(undefined) end),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => SBridge,
+    {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"test-server">>, version => <<"1.0">>,
-        capabilities => #{}
+        tools => [#{name => <<"noop">>, description => <<"Placeholder">>,
+                    input_schema => erlmcp_schema:object([]),
+                    handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end}]
+    }),
+    Responder = erlmcp_reply:new_device(SBridge),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"test-server">>, version => <<"1.0">>
     }),
     {ok, Client} = erlmcp_client_session:start_link(#{
         transport => CBridge,
@@ -43,18 +49,13 @@ init_per_testcase(_TC, Config) ->
     ok = erlmcp_client_session:set_sampling_handler(Client, test_sampling_handler),
     ok = erlmcp_client_session:set_roots_handler(Client, test_roots_handler),
     ok = erlmcp_client_session:set_elicitation_handler(Client, test_elicitation_handler),
-    ok = erlmcp:add_tool(Server, #{
-        name => <<"noop">>, description => <<"Placeholder">>,
-        input_schema => erlmcp_schema:object([]),
-        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
-    }),
     SBridge ! {peer, Client},
     CBridge ! {peer, Server},
     {ok, _} = erlmcp_client_session:initialize(Client, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
-    [{server, Server}, {client, Client},
+    [{server, Server}, {srv, Srv}, {client, Client},
      {s_bridge, SBridge}, {c_bridge, CBridge} | Config].
 
 end_per_testcase(_TC, Config) ->
@@ -77,7 +78,8 @@ bridge(Peer) ->
 
 sampling_end_to_end(Config) ->
     Server = ?config(server, Config),
-    ok = erlmcp:add_tool(Server, #{
+    Srv = ?config(srv, Config),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"ask_llm">>,
         description => <<"Ask the LLM via sampling">>,
         input_schema => erlmcp_schema:object([
@@ -109,7 +111,8 @@ sampling_end_to_end(Config) ->
 
 roots_list(Config) ->
     Server = ?config(server, Config),
-    ok = erlmcp:add_tool(Server, #{
+    Srv = ?config(srv, Config),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"get_roots">>,
         description => <<"Get client roots">>,
         input_schema => erlmcp_schema:object([]),
@@ -126,6 +129,7 @@ roots_list(Config) ->
 
 roots_list_changed(Config) ->
     Server = ?config(server, Config),
+    Srv = ?config(srv, Config),
     Transport = ?config(s_bridge, Config),
     erlmcp_client_session:notify_roots_changed(?config(client, Config)),
     timer:sleep(100),
@@ -139,7 +143,8 @@ roots_list_changed(Config) ->
 
 elicitation_end_to_end(Config) ->
     Server = ?config(server, Config),
-    ok = erlmcp:add_tool(Server, #{
+    Srv = ?config(srv, Config),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"confirm">>,
         description => <<"Ask user to confirm">>,
         input_schema => erlmcp_schema:object([]),
@@ -163,10 +168,13 @@ elicitation_end_to_end(Config) ->
 capability_advertisement(_Config) ->
     SBridge = spawn_link(fun() -> bridge(undefined) end),
     CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, _AdvSrv} = erlmcp_server:start_link(#{
+        name => <<"test">>, version => <<"1.0">>
+    }),
+    AdvResp = erlmcp_reply:new_device(SBridge),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => SBridge,
-        name => <<"test">>, version => <<"1.0">>,
-        capabilities => #{}
+        server => _AdvSrv, responder => AdvResp,
+        name => <<"test">>, version => <<"1.0">>
     }),
     {ok, Client} = erlmcp_client_session:start_link(#{
         transport => CBridge,
@@ -191,7 +199,8 @@ capability_advertisement(_Config) ->
 
 inbound_unknown_method(Config) ->
     Server = ?config(server, Config),
-    ok = erlmcp:add_tool(Server, #{
+    Srv = ?config(srv, Config),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"bad_method">>,
         description => <<"Calls nonexistent method">>,
         input_schema => erlmcp_schema:object([]),
@@ -219,7 +228,8 @@ inbound_unknown_method(Config) ->
 
 inbound_validation_failure(Config) ->
     Server = ?config(server, Config),
-    ok = erlmcp:add_tool(Server, #{
+    Srv = ?config(srv, Config),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"bad_sampling">>,
         description => <<"Sends invalid sampling request">>,
         input_schema => erlmcp_schema:object([]),
@@ -249,12 +259,19 @@ inbound_validation_failure(Config) ->
 callback_crash_isolation(Config) ->
     Client = ?config(client, Config),
     Server = ?config(server, Config),
+    Srv = ?config(srv, Config),
     CrashSampling = spawn_link(fun() -> bridge(undefined) end),
     CrashClient = spawn_link(fun() -> bridge(undefined) end),
-    {ok, Server2} = erlmcp_server_session:start_link(#{
-        transport => CrashSampling,
+    {ok, CrashSrv} = erlmcp_server:start_link(#{
         name => <<"crash-test">>, version => <<"1.0">>,
-        capabilities => #{}
+        tools => [#{name => <<"noop">>, description => <<"Placeholder">>,
+                    input_schema => erlmcp_schema:object([]),
+                    handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end}]
+    }),
+    CrashResp = erlmcp_reply:new_device(CrashSampling),
+    {ok, Server2} = erlmcp_server_session:start_link(#{
+        server => CrashSrv, responder => CrashResp,
+        name => <<"crash-test">>, version => <<"1.0">>
     }),
     {ok, Client2} = erlmcp_client_session:start_link(#{
         transport => CrashClient,
@@ -262,8 +279,8 @@ callback_crash_isolation(Config) ->
         name => <<"crash-client">>, version => <<"1.0">>
     }),
     ok = erlmcp_client_session:set_sampling_handler(Client2, test_crash_sampling),
-    ok = erlmcp:add_tool(Server2, #{
-        name => <<"noop">>, description => <<"Placeholder">>,
+    ok = erlmcp:add_tool(CrashSrv, #{
+        name => <<"crash_tool">>, description => <<"Triggers crash">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
     }),
@@ -273,7 +290,7 @@ callback_crash_isolation(Config) ->
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
-    ok = erlmcp:add_tool(Server2, #{
+    ok = erlmcp:add_tool(CrashSrv, #{
         name => <<"crash_sample">>,
         description => <<"Trigger crashing sampler">>,
         input_schema => erlmcp_schema:object([]),
@@ -302,7 +319,8 @@ callback_crash_isolation(Config) ->
 
 server_peer_request_from_tool(Config) ->
     Server = ?config(server, Config),
-    ok = erlmcp:add_tool(Server, #{
+    Srv = ?config(srv, Config),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"peer_test">>,
         description => <<"Tests peer request">>,
         input_schema => erlmcp_schema:object([]),

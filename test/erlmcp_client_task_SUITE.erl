@@ -27,22 +27,25 @@ end_per_suite(_Config) ->
 init_per_testcase(_TC, Config) ->
     SBridge = spawn_link(fun() -> bridge(undefined) end),
     CBridge = spawn_link(fun() -> bridge(undefined) end),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => SBridge,
+    {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"task-test">>, version => <<"1.0">>,
-        capabilities => #{}
+        tools => [#{
+            name => <<"slow_compute">>,
+            description => <<"Slow computation">>,
+            input_schema => erlmcp_schema:object([
+                erlmcp_schema:field(<<"n">>, erlmcp_schema:number(), [required])
+            ]),
+            task_support => optional,
+            handler => fun(#{<<"n">> := N}, _Ctx) ->
+                timer:sleep(trunc(N)),
+                {ok, erlmcp:text(<<"done">>)}
+            end
+        }]
     }),
-    ok = erlmcp:add_tool(Server, #{
-        name => <<"slow_compute">>,
-        description => <<"Slow computation">>,
-        input_schema => erlmcp_schema:object([
-            erlmcp_schema:field(<<"n">>, erlmcp_schema:number(), [required])
-        ]),
-        task_support => optional,
-        handler => fun(#{<<"n">> := N}, _Ctx) ->
-            timer:sleep(trunc(N)),
-            {ok, erlmcp:text(<<"done">>)}
-        end
+    Responder = erlmcp_reply:new_device(SBridge),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"task-test">>, version => <<"1.0">>
     }),
     {ok, Client} = erlmcp_client_session:start_link(#{
         transport => CBridge,
@@ -115,10 +118,13 @@ client_task_cancel(Config) ->
 client_task_capability_gating(_Config) ->
     SBridge = spawn_link(fun() -> bridge(undefined) end),
     CBridge = spawn_link(fun() -> bridge(undefined) end),
+    {ok, GateSrv} = erlmcp_server:start_link(#{
+        name => <<"no-tasks">>, version => <<"1.0">>
+    }),
+    GateResp = erlmcp_reply:new_device(SBridge),
     {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => SBridge,
-        name => <<"no-tasks">>, version => <<"1.0">>,
-        capabilities => #{}
+        server => GateSrv, responder => GateResp,
+        name => <<"no-tasks">>, version => <<"1.0">>
     }),
     {ok, Client} = erlmcp_client_session:start_link(#{
         transport => CBridge,

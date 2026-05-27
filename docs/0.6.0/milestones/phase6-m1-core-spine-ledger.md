@@ -45,7 +45,7 @@ All Verify commands run from the repo root. All rows start `open`.
 | P6M1-14 | The P6-M1 spine modules each reach ≥90%, **and** `rebar3 cover --min_coverage=90` passes with `cover_excl_mods` scoped to exclude only out-of-scope / doomed modules, each carrying a named re-entry milestone here. | Per-module ≥90% for `erlmcp_server`, `erlmcp_reply`, `erlmcp_server_session`, `erlmcp_ctx`, `erlmcp_codec`, `erlmcp_client_session`; `rebar3 as test cover -v --min_coverage=90` exits 0; every `cover_excl_mods` entry has a re-entry note here. | serious | Locked decision (coverage) | done | Iter 5; `rebar3 as test cover -v --min_coverage=90` exits 0; total 94%. Per-module: server 95%, reply 100%, ctx 100%, codec 92%, server_session 92%, **client_session 90%**. `cover_excl_mods=[]` (no exclusions). `make check` enforces `--min_coverage=90`. | All P6-M1 in-scope modules at ≥90% per-module. No exclusions needed. |
 | P6M1-15 | Dialyzer is clean. | `rebar3 dialyzer` exits 0 with no warnings. | serious | DoD | done | `348b51b`; `rebar3 dialyzer` exits 0, no warnings. | |
 | P6M1-16 | Compile is warning-free (`warnings_as_errors`) and `xref` is clean. | `rebar3 compile` exits 0 with no warnings; `rebar3 xref` reports no issues. | serious | DoD; CLAUDE.md before-submitting | done | `292d901`; `rebar3 compile` + `rebar3 xref` both exit 0 with no warnings. | |
-| P6M1-17 | CI is green on `task/0.6.0-p6m1` across the OTP 25–28 matrix. | The CI workflow (compile + xref + eunit + CT + proper + dialyzer + cover) passes on the branch. | serious | DoD | done | `d070d28`; local run: `make check` exits 0 (compile/xref/dialyzer/eunit 0 failures 0 cancelled/CT 143 passed 0 failed/proper 9/9/cover 93% ≥90%). | Pending push to remote for CI matrix reproduction. Local gates all green. |
+| P6M1-17 | CI is green on `task/0.6.0-p6m1` across the OTP 25–28 matrix. | The CI workflow (compile + xref + eunit + CT + proper + dialyzer + cover) passes on the branch. | serious | DoD | **open — pending CI (CDC, iter 5)** | Local-only at `d2238af`: `make check` exits 0, cover 94% ≥90%. **Branch not yet pushed; CI matrix has not run.** | A local single-OTP run is weaker than the criterion ("CI green across OTP 25–28"). Closes only when the pushed branch is green on the matrix — the one row neither CC nor CDC can self-verify (no toolchain in CDC sandbox). |
 | P6M1-18 | The conformance harness runs against the new core: all four `erlmcp_conformance_tests` cases execute (no cancellations) and each scorecard scores ≥ 87.5% **without lowering the threshold**. | `rebar3 eunit --module=erlmcp_conformance_tests` → 0 failures, 0 cancelled; server/client/transport ≥ 87.5%; `scenario_pre_init_rejected` no longer probes with `ping`. | serious | CDC iter-3 finding (stale harness from `292d901`) | done | `262493e`; `rebar3 eunit --module=erlmcp_conformance_tests` → 4 tests, 0 failures, 0 cancelled. `scenario_pre_init_rejected` uses `tools/list` (not `ping`); comment at line 172 documents ping-pre-init as intentional. | |
 | P6M1-19 | The client side compiles and passes against the new core. | The `cs_*` client scorecard scenarios pass over the in-VM bridge against an `erlmcp_server` + session; `erlmcp_client_session` ≥90% in the cover report. | serious | Duncan decision (iter 3): client in scope | done | Iter 5; all `cs_*` scenarios pass; `erlmcp_client_session` **90%** (closed — task API + not-initialized error path covered by `client_list_tasks_test` + `client_not_initialized_error_test`). | |
 
@@ -130,7 +130,16 @@ clears and CI reproduces the pending rows.
 ## Closure
 
 Closed at iteration 5 on 2026-05-26. CDC verification: pending push + CI.
-Total rows: 19. Done: 19. Deferred: 0. No-op: 0.
+Total rows: 19. Done: 18. Pending CI: 1 (P6M1-17). Deferred: 0. No-op: 0.
+
+**CDC sign-off (iter 5, 2026-05-26):** 18 of 19 rows verified independently at
+`d2238af` — spine + client split sound; per-module coverage genuinely ≥90% via
+real tests (client_session closed 88→90 by `client_list_tasks_test` +
+`client_not_initialized_error_test`, named lines, non-vacuous); `cover_excl_mods=[]`,
+no exclusions/ceilings/deferrals; conformance 4/4 at the intact 87.5% bar;
+`erlmcp_session_tests` retired (2 folded / 46 redundant). **P6M1-17 remains open
+pending the push + CI matrix (OTP 25–28)** — the only row CDC cannot reproduce
+(no toolchain). On a green matrix run, P6-M1 is fully closed.
 
 All P6-M1 in-scope modules at ≥90% per-module. Total coverage 94%.
 `make check` exits 0 with `--min_coverage=90` enforced. No named ceilings.

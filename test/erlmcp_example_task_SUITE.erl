@@ -31,30 +31,33 @@ end_per_suite(_Config) ->
     ok.
 
 init_per_testcase(_TC, Config) ->
-    Transport = self(),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => Transport,
+    {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"task-server">>, version => <<"1.0">>,
-        capabilities => #{}
+        tools => [#{
+            name => <<"slow_compute">>,
+            description => <<"A slow computation">>,
+            input_schema => erlmcp_schema:object([
+                erlmcp_schema:field(<<"n">>, erlmcp_schema:number(), [required])
+            ]),
+            task_support => optional,
+            handler => fun(#{<<"n">> := N}, Ctx) ->
+                erlmcp_ctx:report_progress(Ctx, 0.5, <<"halfway">>),
+                timer:sleep(trunc(N)),
+                {ok, erlmcp:text(<<"done">>)}
+            end
+        }]
     }),
-    ok = erlmcp:add_tool(Server, #{
-        name => <<"slow_compute">>,
-        description => <<"A slow computation">>,
-        input_schema => erlmcp_schema:object([
-            erlmcp_schema:field(<<"n">>, erlmcp_schema:number(), [required])
-        ]),
-        task_support => optional,
-        handler => fun(#{<<"n">> := N}, Ctx) ->
-            erlmcp_ctx:report_progress(Ctx, 0.5, <<"halfway">>),
-            timer:sleep(trunc(N)),
-            {ok, erlmcp:text(<<"done">>)}
-        end
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"task-server">>, version => <<"1.0">>
     }),
-    initialize(Server),
-    [{server, Server} | Config].
+    initialize(Session),
+    [{server, Session}, {srv, Srv} | Config].
 
 end_per_testcase(_TC, Config) ->
     catch gen_statem:stop(?config(server, Config)),
+    catch gen_server:stop(?config(srv, Config)),
     ok.
 
 initialize(Server) ->
@@ -93,7 +96,7 @@ task_tool_in_list(Config) ->
     Resp = send_req(Server, 2, <<"tools/list">>, #{}),
     Tools = maps:get(<<"tools">>, maps:get(<<"result">>, Resp)),
     Tool = hd([T || T <- Tools, maps:get(<<"name">>, T) =:= <<"slow_compute">>]),
-    ?assertEqual(<<"optional">>, maps:get(<<"taskSupport">>, Tool)).
+    ?assertEqual(#{<<"supported">> => true}, maps:get(<<"taskSupport">>, Tool)).
 
 task_call_returns_id(Config) ->
     Server = ?config(server, Config),
@@ -170,18 +173,18 @@ task_progress(Config) ->
     ?assertEqual(<<"notifications/progress">>, maps:get(<<"method">>, ProgressNotif)).
 
 task_capability_derived(Config) ->
-    gen_statem:stop(?config(server, Config)),
-    Transport = self(),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => Transport,
+    catch gen_statem:stop(?config(server, Config)),
+    catch gen_server:stop(?config(srv, Config)),
+    {ok, NoTaskSrv} = erlmcp_server:start_link(#{
         name => <<"no-task-server">>, version => <<"1.0">>,
-        capabilities => #{}
+        tools => [#{name => <<"no_task">>, description => <<"No task support">>,
+                    input_schema => erlmcp_schema:object([]),
+                    handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end}]
     }),
-    ok = erlmcp:add_tool(Server, #{
-        name => <<"no_task">>,
-        description => <<"No task support">>,
-        input_schema => erlmcp_schema:object([]),
-        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    R1 = erlmcp_reply:new_device(self()),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        server => NoTaskSrv, responder => R1,
+        name => <<"no-task-server">>, version => <<"1.0">>
     }),
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
@@ -192,17 +195,18 @@ task_capability_derived(Config) ->
     Caps = maps:get(<<"capabilities">>, maps:get(<<"result">>, InitResp)),
     ?assertNot(maps:is_key(<<"tasks">>, Caps)),
     gen_statem:stop(Server),
-    {ok, Server2} = erlmcp_server_session:start_link(#{
-        transport => Transport,
+    gen_server:stop(NoTaskSrv),
+    {ok, TaskSrv} = erlmcp_server:start_link(#{
         name => <<"task-server">>, version => <<"1.0">>,
-        capabilities => #{}
+        tools => [#{name => <<"task_tool">>, description => <<"With task support">>,
+                    input_schema => erlmcp_schema:object([]),
+                    task_support => optional,
+                    handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end}]
     }),
-    ok = erlmcp:add_tool(Server2, #{
-        name => <<"task_tool">>,
-        description => <<"With task support">>,
-        input_schema => erlmcp_schema:object([]),
-        task_support => optional,
-        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    R2 = erlmcp_reply:new_device(self()),
+    {ok, Server2} = erlmcp_server_session:start_link(#{
+        server => TaskSrv, responder => R2,
+        name => <<"task-server">>, version => <<"1.0">>
     }),
     erlmcp_server_session:send_message(Server2, InitReq),
     InitResp2 = decode(wait_send()),

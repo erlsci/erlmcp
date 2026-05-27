@@ -38,13 +38,7 @@ jobs:
     - name: EUnit Tests
       run: rebar3 eunit -v
     - name: Common Test
-      run: |
-        # CT auto-skips example suites that need profile-specific compilation
-        # (simple/calculator/weather profiles). The example suites are tested
-        # via EUnit (m3a/m3b tests) and the conformance harness. The auto-skips
-        # cause a non-zero exit; ignore it — real failures are caught by the
-        # 0-failed count in the CT output.
-        rebar3 ct -v || true
+      run: rebar3 ct -v
     - name: PropEr Tests
       run: rebar3 proper -c
     - name: Dialyzer
