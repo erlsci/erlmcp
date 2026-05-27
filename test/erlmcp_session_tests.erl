@@ -783,7 +783,7 @@ server_resource_subscribe_test() ->
         #{<<"uri">> => <<"x://a">>}),
     erlmcp_server_session:send_message(Server, SubReq),
     _SubResp = wait_transport_send(),
-    erlmcp_server_session:notify_resource_updated(Server, <<"x://a">>),
+    gen_statem:cast(Server, {resource_updated, <<"x://a">>}),
     Notif = decode_resp(wait_transport_send()),
     ?assertEqual(<<"notifications/resources/updated">>, maps:get(<<"method">>, Notif)),
     gen_statem:stop(Server).

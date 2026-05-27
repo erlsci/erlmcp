@@ -46,7 +46,7 @@ setup_pair() ->
 %%====================================================================
 
 sampling_test() ->
-    {Srv, Server, Client} = setup_pair(),
+    {Srv, _Server, Client} = setup_pair(),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"sample">>, description => <<"Sample">>,
         input_schema => erlmcp_schema:object([]),
@@ -67,7 +67,7 @@ sampling_test() ->
 %%====================================================================
 
 roots_test() ->
-    {Srv, Server, Client} = setup_pair(),
+    {Srv, _Server, Client} = setup_pair(),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"roots">>, description => <<"Roots">>,
         input_schema => erlmcp_schema:object([]),
@@ -94,7 +94,7 @@ roots_changed_test() ->
 %%====================================================================
 
 elicitation_test() ->
-    {Srv, Server, Client} = setup_pair(),
+    {Srv, _Server, Client} = setup_pair(),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"elicit">>, description => <<"Elicit">>,
         input_schema => erlmcp_schema:object([]),
@@ -114,7 +114,7 @@ elicitation_test() ->
 %%====================================================================
 
 unknown_method_test() ->
-    {Srv, Server, Client} = setup_pair(),
+    {Srv, _Server, Client} = setup_pair(),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"unknown">>, description => <<"Unknown">>,
         input_schema => erlmcp_schema:object([]),
@@ -136,7 +136,7 @@ unknown_method_test() ->
 %%====================================================================
 
 validation_failure_test() ->
-    {Srv, Server, Client} = setup_pair(),
+    {Srv, _Server, Client} = setup_pair(),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"invalid">>, description => <<"Invalid">>,
         input_schema => erlmcp_schema:object([]),
@@ -248,7 +248,7 @@ set_handler_operational_test() ->
 %%====================================================================
 
 inbound_request_wire_test() ->
-    {Srv, Server, Client} = setup_pair(),
+    {Srv, _Server, Client} = setup_pair(),
     ok = erlmcp:add_tool(Srv, #{
         name => <<"wire">>, description => <<"Wire test">>,
         input_schema => erlmcp_schema:object([]),

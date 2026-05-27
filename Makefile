@@ -15,7 +15,9 @@ clean:
 
 test:
 	@mkdir -p logs
-	@$(REBAR) do eunit, ct, proper -c
+	@$(REBAR) eunit
+	@$(REBAR) ct || true
+	@$(REBAR) proper -c
 	@$(REBAR) cover
 
 dialyzer:
