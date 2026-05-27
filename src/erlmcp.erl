@@ -228,7 +228,7 @@ group_by_category(Tools) ->
 %% Resources (M2b)
 %%====================================================================
 
--spec add_resource(erlmcp_server:server(), resource_spec()) -> ok.
+-spec add_resource(erlmcp_server:server(), resource_spec()) -> ok | {error, {invalid_resource_spec, term()}}.
 add_resource(Server, Spec) when is_map(Spec) ->
     erlmcp_server:register_resource(Server, Spec).
 
@@ -236,7 +236,7 @@ add_resource(Server, Spec) when is_map(Spec) ->
 remove_resource(Server, Uri) when is_binary(Uri) ->
     erlmcp_server:unregister_resource(Server, Uri).
 
--spec add_resource_template(erlmcp_server:server(), resource_spec()) -> ok.
+-spec add_resource_template(erlmcp_server:server(), resource_spec()) -> ok | {error, {invalid_resource_template_spec, term()}}.
 add_resource_template(Server, Spec) when is_map(Spec) ->
     erlmcp_server:register_resource_template(Server, Spec).
 
@@ -252,7 +252,7 @@ notify_resource_updated(Session, Uri) when is_pid(Session), is_binary(Uri) ->
 %% Prompts (M2b)
 %%====================================================================
 
--spec add_prompt(erlmcp_server:server(), prompt_spec()) -> ok.
+-spec add_prompt(erlmcp_server:server(), prompt_spec()) -> ok | {error, {invalid_prompt_spec, term()}}.
 add_prompt(Server, Spec) when is_map(Spec) ->
     erlmcp_server:register_prompt(Server, Spec).
 

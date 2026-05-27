@@ -87,7 +87,8 @@ unregister_prompt_test() ->
 register_resource_template_test() ->
     Pid = start_server(#{}),
     Tab = erlmcp_server:catalog_table(Pid),
-    Spec = #{uri_template => <<"file:///{path}">>, name => <<"files">>},
+    Spec = #{uri_template => <<"file:///{path}">>, name => <<"files">>,
+              handler => fun(_, _) -> {ok, []} end},
     ok = erlmcp_server:register_resource_template(Pid, Spec),
     ?assertEqual(1, maps:size(erlmcp_server:get_resource_templates(Tab))),
     stop_server(Pid).
@@ -183,7 +184,8 @@ unregister_session_test() ->
 unregister_resource_template_test() ->
     Pid = start_server(#{}),
     Tab = erlmcp_server:catalog_table(Pid),
-    Spec = #{uri_template => <<"tmpl/{x}">>, name => <<"t">>},
+    Spec = #{uri_template => <<"tmpl/{x}">>, name => <<"t">>,
+              handler => fun(_, _) -> {ok, []} end},
     ok = erlmcp_server:register_resource_template(Pid, Spec),
     ok = erlmcp_server:unregister_resource_template(Pid, <<"tmpl/{x}">>),
     ?assertEqual(#{}, erlmcp_server:get_resource_templates(Tab)),
@@ -232,4 +234,75 @@ handlers_in_config_test() ->
     Pid = start_server(#{handlers => #{<<"custom">> => fun(_, _) -> ok end}}),
     Tab = erlmcp_server:catalog_table(Pid),
     ?assertEqual(1, maps:size(erlmcp_server:get_handlers(Tab))),
+    stop_server(Pid).
+
+%%====================================================================
+%% Registration validation
+%%====================================================================
+
+validate_tool_ok_test() ->
+    Pid = start_server(#{}),
+    ok = erlmcp_server:register_tool(Pid, make_tool(<<"v">>)),
+    stop_server(Pid).
+
+validate_tool_missing_name_test() ->
+    Pid = start_server(#{}),
+    ?assertMatch({error, {invalid_tool_spec, {missing, name}}},
+        erlmcp_server:register_tool(Pid, #{description => <<"d">>,
+            handler => fun(_, _) -> ok end})),
+    stop_server(Pid).
+
+validate_tool_missing_handler_test() ->
+    Pid = start_server(#{}),
+    ?assertMatch({error, {invalid_tool_spec, missing_handler}},
+        erlmcp_server:register_tool(Pid, #{name => <<"t">>, description => <<"d">>})),
+    stop_server(Pid).
+
+validate_resource_ok_test() ->
+    Pid = start_server(#{}),
+    ok = erlmcp_server:register_resource(Pid, make_resource(<<"file:///ok">>)),
+    stop_server(Pid).
+
+validate_resource_missing_uri_test() ->
+    Pid = start_server(#{}),
+    ?assertMatch({error, {invalid_resource_spec, {missing, uri}}},
+        erlmcp_server:register_resource(Pid, #{name => <<"r">>,
+            handler => fun(_) -> ok end})),
+    stop_server(Pid).
+
+validate_resource_missing_handler_test() ->
+    Pid = start_server(#{}),
+    ?assertMatch({error, {invalid_resource_spec, missing_handler}},
+        erlmcp_server:register_resource(Pid, #{uri => <<"x://a">>, name => <<"r">>})),
+    stop_server(Pid).
+
+validate_resource_template_ok_test() ->
+    Pid = start_server(#{}),
+    ok = erlmcp_server:register_resource_template(Pid,
+        #{uri_template => <<"x://{id}">>, name => <<"t">>,
+          handler => fun(_, _) -> ok end}),
+    stop_server(Pid).
+
+validate_resource_template_missing_uri_template_test() ->
+    Pid = start_server(#{}),
+    ?assertMatch({error, {invalid_resource_template_spec, {missing, uri_template}}},
+        erlmcp_server:register_resource_template(Pid,
+            #{name => <<"t">>, handler => fun(_, _) -> ok end})),
+    stop_server(Pid).
+
+validate_prompt_ok_test() ->
+    Pid = start_server(#{}),
+    ok = erlmcp_server:register_prompt(Pid, make_prompt(<<"vp">>)),
+    stop_server(Pid).
+
+validate_prompt_missing_name_test() ->
+    Pid = start_server(#{}),
+    ?assertMatch({error, {invalid_prompt_spec, {missing, name}}},
+        erlmcp_server:register_prompt(Pid, #{handler => fun(_, _) -> ok end})),
+    stop_server(Pid).
+
+validate_prompt_missing_handler_test() ->
+    Pid = start_server(#{}),
+    ?assertMatch({error, {invalid_prompt_spec, missing_handler}},
+        erlmcp_server:register_prompt(Pid, #{name => <<"p">>})),
     stop_server(Pid).

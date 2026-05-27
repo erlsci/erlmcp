@@ -64,25 +64,34 @@ register_tool(Server, ToolSpec) when is_map(ToolSpec) ->
 unregister_tool(Server, ToolName) when is_binary(ToolName) ->
     gen_server:call(Server, {unregister_tool, ToolName}).
 
--spec register_resource(server(), map()) -> ok.
+-spec register_resource(server(), map()) -> ok | {error, {invalid_resource_spec, term()}}.
 register_resource(Server, Spec) when is_map(Spec) ->
-    gen_server:call(Server, {register_resource, Spec}).
+    case validate_resource_spec(Spec) of
+        ok -> gen_server:call(Server, {register_resource, Spec});
+        {error, _} = Err -> Err
+    end.
 
 -spec unregister_resource(server(), binary()) -> ok.
 unregister_resource(Server, Uri) when is_binary(Uri) ->
     gen_server:call(Server, {unregister_resource, Uri}).
 
--spec register_resource_template(server(), map()) -> ok.
+-spec register_resource_template(server(), map()) -> ok | {error, {invalid_resource_template_spec, term()}}.
 register_resource_template(Server, Spec) when is_map(Spec) ->
-    gen_server:call(Server, {register_resource_template, Spec}).
+    case validate_resource_template_spec(Spec) of
+        ok -> gen_server:call(Server, {register_resource_template, Spec});
+        {error, _} = Err -> Err
+    end.
 
 -spec unregister_resource_template(server(), binary()) -> ok.
 unregister_resource_template(Server, UriTemplate) when is_binary(UriTemplate) ->
     gen_server:call(Server, {unregister_resource_template, UriTemplate}).
 
--spec register_prompt(server(), map()) -> ok.
+-spec register_prompt(server(), map()) -> ok | {error, {invalid_prompt_spec, term()}}.
 register_prompt(Server, Spec) when is_map(Spec) ->
-    gen_server:call(Server, {register_prompt, Spec}).
+    case validate_prompt_spec(Spec) of
+        ok -> gen_server:call(Server, {register_prompt, Spec});
+        {error, _} = Err -> Err
+    end.
 
 -spec unregister_prompt(server(), binary()) -> ok.
 unregister_prompt(Server, Name) when is_binary(Name) ->
@@ -252,27 +261,14 @@ terminate(_Reason, _State) ->
     ok.
 
 %%====================================================================
-%% Internal — validation
+%% Internal — registration validation
 %%====================================================================
 
 -spec validate_tool_spec(map()) -> ok | {error, {invalid_tool_spec, term()}}.
 validate_tool_spec(Spec) ->
-    case maps:get(name, Spec, undefined) of
-        N when is_binary(N), byte_size(N) > 0 ->
-            case maps:get(description, Spec, undefined) of
-                D when is_binary(D) ->
-                    validate_tool_handler(Spec);
-                undefined ->
-                    {error, {invalid_tool_spec, missing_description}};
-                _ ->
-                    {error, {invalid_tool_spec, {bad_type, description, binary}}}
-            end;
-        undefined ->
-            {error, {invalid_tool_spec, missing_name}};
-        <<>> ->
-            {error, {invalid_tool_spec, empty_name}};
-        _ ->
-            {error, {invalid_tool_spec, {bad_type, name, binary}}}
+    case check_required_keys(Spec, [{name, binary}, {description, binary}]) of
+        ok -> validate_tool_handler(Spec);
+        {error, Reason} -> {error, {invalid_tool_spec, Reason}}
     end.
 
 validate_tool_handler(Spec) ->
@@ -286,6 +282,49 @@ validate_tool_handler(Spec) ->
         {undefined, M} when is_atom(M) -> ok;
         _ ->
             {error, {invalid_tool_spec, invalid_handler}}
+    end.
+
+-spec validate_resource_spec(map()) -> ok | {error, {invalid_resource_spec, term()}}.
+validate_resource_spec(Spec) ->
+    case check_required_keys(Spec, [{uri, binary}, {name, binary}]) of
+        ok -> check_has_handler(Spec, invalid_resource_spec);
+        {error, Reason} -> {error, {invalid_resource_spec, Reason}}
+    end.
+
+-spec validate_resource_template_spec(map()) -> ok | {error, {invalid_resource_template_spec, term()}}.
+validate_resource_template_spec(Spec) ->
+    case check_required_keys(Spec, [{uri_template, binary}, {name, binary}]) of
+        ok -> check_has_handler(Spec, invalid_resource_template_spec);
+        {error, Reason} -> {error, {invalid_resource_template_spec, Reason}}
+    end.
+
+-spec validate_prompt_spec(map()) -> ok | {error, {invalid_prompt_spec, term()}}.
+validate_prompt_spec(Spec) ->
+    case check_required_keys(Spec, [{name, binary}]) of
+        ok -> check_has_handler(Spec, invalid_prompt_spec);
+        {error, Reason} -> {error, {invalid_prompt_spec, Reason}}
+    end.
+
+check_required_keys(_Spec, []) ->
+    ok;
+check_required_keys(Spec, [{Key, binary} | Rest]) ->
+    case maps:get(Key, Spec, undefined) of
+        V when is_binary(V), byte_size(V) > 0 ->
+            check_required_keys(Spec, Rest);
+        undefined ->
+            {error, {missing, Key}};
+        <<>> ->
+            {error, {empty, Key}};
+        _ ->
+            {error, {bad_type, Key, binary}}
+    end.
+
+check_has_handler(Spec, ErrorTag) ->
+    case maps:get(handler, Spec, undefined) of
+        F when is_function(F) -> ok;
+        {M, F} when is_atom(M), is_atom(F) -> ok;
+        undefined -> {error, {ErrorTag, missing_handler}};
+        _ -> {error, {ErrorTag, invalid_handler}}
     end.
 
 %%====================================================================

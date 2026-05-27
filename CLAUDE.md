@@ -52,6 +52,48 @@ built on the Inaka/OTP rubric captured in `docs/0.6.0/planning/phase0-erlang-rub
   queryable version control; the git log and published release notes cover it. Don't
   write a CHANGELOG requirement into ledgers or docs checklists.
 
+## Never loosen a check to make it pass — hard rule, no exceptions without sanction
+
+A failing check — compiler warning, Dialyzer/type warning, linter, xref, test, or
+coverage gate — is **information about a real defect**. Silencing the check destroys
+the information and ships the defect. **Making the check's *output* go away instead
+of fixing the code is forbidden.** This is the most important rule in this file. It
+has been violated repeatedly across many languages; here it is treated as a serious
+process failure, not a shortcut.
+
+**Forbidden — never do any of these to reach green (in *any* language/tool):**
+
+- **Inline suppressions:** `-dialyzer(...)` / `nowarn_*`, `% eslint-disable`,
+  `#[allow(...)]`, `# type: ignore` / `# noqa`, `@ts-ignore` / `@ts-nocheck`,
+  `//nolint`, `@SuppressWarnings`, `# rubocop:disable`, and every equivalent.
+- **Loosening config:** removing or disabling warnings/lint rules, turning off
+  `warnings_as_errors`, lowering a coverage threshold, adding modules to
+  `cover_excl_mods` / ignore-lists / exclude-globs, relaxing a compiler or
+  type-checker flag.
+- **Type laundering:** widening a spec/type to `term()` / `any()` / `dynamic` /
+  `Object` to silence a type warning instead of stating the true type.
+- **Spec-to-bug fitting:** editing a `-spec`/type to match what buggy code *does*
+  rather than fixing the code to do what it *should*.
+- **Test evasion:** deleting, skipping, `@ignore` / `.skip` / `xit` / commenting
+  out, or weakening assertions on a failing test; widening a property's bounds to
+  pass.
+
+**The principle: make the code satisfy the check, not the check satisfy the code.**
+A check that fires found something before a user did.
+
+**The only sanctioned path when a check looks *wrong*:** stop and **escalate** to
+CDC/Duncan with the exact `file:line` and why you believe it's a false positive or
+genuinely unreachable. Do not decide unilaterally, and do not loosen as a first
+move. A real false positive is then closed by a **narrow, single-site, commented,
+approved** exception naming the reason and who sanctioned it — never a broad or
+silent loosening. If a proper fix is out of scope, that is a **disclosed deferral
+with a re-entry condition**, not a suppression. (Cf. the coverage rule above: a
+genuine ceiling is a *raised amendment naming exact lines*, not a blanket pass.)
+
+Strict checks were turned **on** here deliberately (e.g. the un-suppressed Dialyzer
+warning set, `warnings_as_errors`). Turning them back down to pass is exactly the
+regression this rule exists to prevent.
+
 ## How we work (process rigour)
 
 Two roles. **CC** implements and self-assesses. **CDC** (a separate context /
@@ -109,5 +151,8 @@ over agreeable hedging. Being corrected is a contribution, not a defeat. See
 - [ ] `rebar3 eunit` + Common Test green; PropEr properties pass where defined.
 - [ ] `rebar3 dialyzer` clean.
 - [ ] Coverage gate passes (scoped per `cover_excl_mods` in `rebar.config`).
+- [ ] **No check was weakened to reach green** — no suppressions, no loosened
+      config/flags, no type laundering, no spec-to-bug fitting, no skipped/deleted
+      tests (see *Never loosen a check to make it pass*).
 - [ ] Ledger rows updated with evidence; per-row closing report written.
 - [ ] Self-reviewed against the Erlang skill (`priv/ai/erlang/SKILL.md`).
