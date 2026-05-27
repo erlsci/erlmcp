@@ -53,9 +53,12 @@ register_session(Server, Session) when is_pid(Session) ->
 unregister_session(Server, Session) when is_pid(Session) ->
     gen_server:call(Server, {unregister_session, Session}).
 
--spec register_tool(server(), map()) -> ok.
+-spec register_tool(server(), map()) -> ok | {error, {invalid_tool_spec, term()}}.
 register_tool(Server, ToolSpec) when is_map(ToolSpec) ->
-    gen_server:call(Server, {register_tool, ToolSpec}).
+    case validate_tool_spec(ToolSpec) of
+        ok -> gen_server:call(Server, {register_tool, ToolSpec});
+        {error, _} = Err -> Err
+    end.
 
 -spec unregister_tool(server(), binary()) -> ok.
 unregister_tool(Server, ToolName) when is_binary(ToolName) ->
@@ -249,7 +252,44 @@ terminate(_Reason, _State) ->
     ok.
 
 %%====================================================================
-%% Internal
+%% Internal — validation
+%%====================================================================
+
+-spec validate_tool_spec(map()) -> ok | {error, {invalid_tool_spec, term()}}.
+validate_tool_spec(Spec) ->
+    case maps:get(name, Spec, undefined) of
+        N when is_binary(N), byte_size(N) > 0 ->
+            case maps:get(description, Spec, undefined) of
+                D when is_binary(D) ->
+                    validate_tool_handler(Spec);
+                undefined ->
+                    {error, {invalid_tool_spec, missing_description}};
+                _ ->
+                    {error, {invalid_tool_spec, {bad_type, description, binary}}}
+            end;
+        undefined ->
+            {error, {invalid_tool_spec, missing_name}};
+        <<>> ->
+            {error, {invalid_tool_spec, empty_name}};
+        _ ->
+            {error, {invalid_tool_spec, {bad_type, name, binary}}}
+    end.
+
+validate_tool_handler(Spec) ->
+    Handler = maps:get(handler, Spec, undefined),
+    HandlerMod = maps:get(handler_module, Spec, undefined),
+    case {Handler, HandlerMod} of
+        {undefined, undefined} ->
+            {error, {invalid_tool_spec, missing_handler}};
+        {F, _} when is_function(F, 2) -> ok;
+        {{M, F}, _} when is_atom(M), is_atom(F) -> ok;
+        {undefined, M} when is_atom(M) -> ok;
+        _ ->
+            {error, {invalid_tool_spec, invalid_handler}}
+    end.
+
+%%====================================================================
+%% Internal — ETS helpers
 %%====================================================================
 
 ets_get_map(Tab, Key) ->

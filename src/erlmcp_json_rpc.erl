@@ -242,7 +242,7 @@ parse_request(Id, Method, Data) when is_binary(Method) ->
 parse_request(_Id, Method, _Data) ->
     {error, {invalid_request, {invalid_method, Method}}}.
 
--spec parse_response(json_rpc_id(), term(), term()) -> decode_result().
+-spec parse_response(json_rpc_id(), term(), term()) -> {ok, #json_rpc_response{}}.
 parse_response(Id, Result, Error) ->
     {ok,
      #json_rpc_response{id = decode_id(Id),
