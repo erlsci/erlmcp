@@ -25,7 +25,7 @@
 %% gen_server
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
--type server() :: pid().
+-opaque server() :: pid().
 -export_type([server/0]).
 
 -record(state, {
