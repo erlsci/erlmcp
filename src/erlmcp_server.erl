@@ -37,7 +37,7 @@
 %% API
 %%====================================================================
 
--spec start_link(map()) -> {ok, pid()} | {error, term()}.
+-spec start_link(map()) -> gen_server:start_ret().
 start_link(Config) when is_map(Config) ->
     gen_server:start_link(?MODULE, Config, []).
 

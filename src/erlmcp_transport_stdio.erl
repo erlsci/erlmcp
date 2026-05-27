@@ -39,7 +39,7 @@ close(Pid) when is_pid(Pid) ->
 %%====================================================================
 
 -spec start_link(atom(), erlmcp_transport:config()) ->
-    {ok, pid()} | {error, term()}.
+    gen_server:start_ret().
 start_link(TransportId, Config) when is_atom(TransportId), is_map(Config) ->
     gen_server:start_link(?MODULE, {TransportId, Config}, []).
 

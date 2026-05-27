@@ -35,7 +35,7 @@
 %% API
 %%====================================================================
 
--spec start_link(map()) -> {ok, pid()} | {error, term()}.
+-spec start_link(map()) -> gen_statem:start_ret().
 start_link(Opts) when is_map(Opts) ->
     gen_statem:start_link(?MODULE, Opts, []).
 

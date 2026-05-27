@@ -16,11 +16,11 @@
     test_mode = false :: boolean()
 }).
 
--spec start_link(map()) -> {ok, pid()} | {error, term()}.
+-spec start_link(map()) -> gen_server:start_ret().
 start_link(Opts) when is_map(Opts) ->
     gen_server:start_link(?MODULE, Opts, []).
 
--spec start_link(atom(), map()) -> {ok, pid()} | {error, term()}.
+-spec start_link(atom(), map()) -> gen_server:start_ret().
 start_link(TransportId, Opts) when is_atom(TransportId), is_map(Opts) ->
     gen_server:start_link(?MODULE, Opts#{transport_id => TransportId}, []).
 

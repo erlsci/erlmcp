@@ -74,7 +74,7 @@ close(Pid) when is_pid(Pid) ->
 %% API Functions
 %%====================================================================
 
--spec start_link(http_opts()) -> {ok, pid()} | {error, term()}.
+-spec start_link(http_opts()) -> gen_server:start_ret().
 start_link(Opts) when is_map(Opts) ->
     gen_server:start_link(?MODULE, Opts, []).
 
