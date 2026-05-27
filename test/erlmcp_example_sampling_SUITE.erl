@@ -127,7 +127,6 @@ roots_list(Config) ->
 
 roots_list_changed(Config) ->
     Server = ?config(server, Config),
-    Srv = ?config(srv, Config),
     Transport = ?config(s_bridge, Config),
     erlmcp_client_session:notify_roots_changed(?config(client, Config)),
     timer:sleep(100),
@@ -254,7 +253,6 @@ inbound_validation_failure(Config) ->
 callback_crash_isolation(Config) ->
     Client = ?config(client, Config),
     Server = ?config(server, Config),
-    Srv = ?config(srv, Config),
     CrashSampling = spawn_link(fun() -> bridge(undefined) end),
     CrashClient = spawn_link(fun() -> bridge(undefined) end),
     {ok, CrashSrv} = erlmcp_server:start_link(#{
