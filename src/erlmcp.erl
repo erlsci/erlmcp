@@ -139,15 +139,15 @@ unbind_transport(TransportId) ->
 %%====================================================================
 
 -spec add_tool(erlmcp_server:server(), tool_spec()) -> ok | {error, term()}.
-add_tool(Server, ToolSpec) when is_pid(Server), is_map(ToolSpec) ->
+add_tool(Server, ToolSpec) when is_map(ToolSpec) ->
     erlmcp_server:register_tool(Server, ToolSpec).
 
 -spec remove_tool(erlmcp_server:server(), binary()) -> ok.
-remove_tool(Server, ToolName) when is_pid(Server), is_binary(ToolName) ->
+remove_tool(Server, ToolName) when is_binary(ToolName) ->
     erlmcp_server:unregister_tool(Server, ToolName).
 
 -spec register_handler(erlmcp_server:server(), module()) -> ok.
-register_handler(Server, Module) when is_pid(Server), is_atom(Module) ->
+register_handler(Server, Module) when is_atom(Module) ->
     erlmcp_server:register_handler(Server, Module).
 
 %%====================================================================
@@ -229,19 +229,19 @@ group_by_category(Tools) ->
 %%====================================================================
 
 -spec add_resource(erlmcp_server:server(), resource_spec()) -> ok.
-add_resource(Server, Spec) when is_pid(Server), is_map(Spec) ->
+add_resource(Server, Spec) when is_map(Spec) ->
     erlmcp_server:register_resource(Server, Spec).
 
 -spec remove_resource(erlmcp_server:server(), binary()) -> ok.
-remove_resource(Server, Uri) when is_pid(Server), is_binary(Uri) ->
+remove_resource(Server, Uri) when is_binary(Uri) ->
     erlmcp_server:unregister_resource(Server, Uri).
 
 -spec add_resource_template(erlmcp_server:server(), resource_spec()) -> ok.
-add_resource_template(Server, Spec) when is_pid(Server), is_map(Spec) ->
+add_resource_template(Server, Spec) when is_map(Spec) ->
     erlmcp_server:register_resource_template(Server, Spec).
 
 -spec remove_resource_template(erlmcp_server:server(), binary()) -> ok.
-remove_resource_template(Server, UriTemplate) when is_pid(Server), is_binary(UriTemplate) ->
+remove_resource_template(Server, UriTemplate) when is_binary(UriTemplate) ->
     erlmcp_server:unregister_resource_template(Server, UriTemplate).
 
 -spec notify_resource_updated(pid(), binary()) -> ok.
@@ -253,11 +253,11 @@ notify_resource_updated(Session, Uri) when is_pid(Session), is_binary(Uri) ->
 %%====================================================================
 
 -spec add_prompt(erlmcp_server:server(), prompt_spec()) -> ok.
-add_prompt(Server, Spec) when is_pid(Server), is_map(Spec) ->
+add_prompt(Server, Spec) when is_map(Spec) ->
     erlmcp_server:register_prompt(Server, Spec).
 
 -spec remove_prompt(erlmcp_server:server(), binary()) -> ok.
-remove_prompt(Server, Name) when is_pid(Server), is_binary(Name) ->
+remove_prompt(Server, Name) when is_binary(Name) ->
     erlmcp_server:unregister_prompt(Server, Name).
 
 %%====================================================================
