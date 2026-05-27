@@ -45,7 +45,7 @@ All Verify commands run from the repo root. All rows start `open`.
 | P6M1-14 | The P6-M1 spine modules each reach ≥90%, **and** `rebar3 cover --min_coverage=90` passes with `cover_excl_mods` scoped to exclude only out-of-scope / doomed modules, each carrying a named re-entry milestone here. | Per-module ≥90% for `erlmcp_server`, `erlmcp_reply`, `erlmcp_server_session`, `erlmcp_ctx`, `erlmcp_codec`, `erlmcp_client_session`; `rebar3 as test cover -v --min_coverage=90` exits 0; every `cover_excl_mods` entry has a re-entry note here. | serious | Locked decision (coverage) | done | Iter 5; `rebar3 as test cover -v --min_coverage=90` exits 0; total 94%. Per-module: server 95%, reply 100%, ctx 100%, codec 92%, server_session 92%, **client_session 90%**. `cover_excl_mods=[]` (no exclusions). `make check` enforces `--min_coverage=90`. | All P6-M1 in-scope modules at ≥90% per-module. No exclusions needed. |
 | P6M1-15 | Dialyzer is clean. | `rebar3 dialyzer` exits 0 with no warnings. | serious | DoD | done | `348b51b`; `rebar3 dialyzer` exits 0, no warnings. | |
 | P6M1-16 | Compile is warning-free (`warnings_as_errors`) and `xref` is clean. | `rebar3 compile` exits 0 with no warnings; `rebar3 xref` reports no issues. | serious | DoD; CLAUDE.md before-submitting | done | `292d901`; `rebar3 compile` + `rebar3 xref` both exit 0 with no warnings. | |
-| P6M1-17 | CI is green on `task/0.6.0-p6m1` across the OTP 25–28 matrix. | The CI workflow (compile + xref + eunit + CT + proper + dialyzer + cover) passes on the branch. | serious | DoD | **open — pending CI (CDC, iter 5)** | Local-only at `d2238af`: `make check` exits 0, cover 94% ≥90%. **Branch not yet pushed; CI matrix has not run.** | A local single-OTP run is weaker than the criterion ("CI green across OTP 25–28"). Closes only when the pushed branch is green on the matrix — the one row neither CC nor CDC can self-verify (no toolchain in CDC sandbox). |
+| P6M1-17 | CI is green on `task/0.6.0-p6m1` across the OTP 25–28 matrix. | The CI workflow (compile + xref + eunit + CT + proper + dialyzer + cover) passes on the branch. | serious | DoD | **done** | CI green across the OTP 25–28 matrix on `task/0.6.0-p6m1` (incl. the CI-unification, strict-dialyzer hardening, and registration-validation work that rode the branch). Confirmed by Duncan, 2026-05-27. | The independent reproducer the whole protocol depends on; now green, so P6M1-15 (dialyzer) is confirmed under the strict set on 27/28 too. |
 | P6M1-18 | The conformance harness runs against the new core: all four `erlmcp_conformance_tests` cases execute (no cancellations) and each scorecard scores ≥ 87.5% **without lowering the threshold**. | `rebar3 eunit --module=erlmcp_conformance_tests` → 0 failures, 0 cancelled; server/client/transport ≥ 87.5%; `scenario_pre_init_rejected` no longer probes with `ping`. | serious | CDC iter-3 finding (stale harness from `292d901`) | done | `262493e`; `rebar3 eunit --module=erlmcp_conformance_tests` → 4 tests, 0 failures, 0 cancelled. `scenario_pre_init_rejected` uses `tools/list` (not `ping`); comment at line 172 documents ping-pre-init as intentional. | |
 | P6M1-19 | The client side compiles and passes against the new core. | The `cs_*` client scorecard scenarios pass over the in-VM bridge against an `erlmcp_server` + session; `erlmcp_client_session` ≥90% in the cover report. | serious | Duncan decision (iter 3): client in scope | done | Iter 5; all `cs_*` scenarios pass; `erlmcp_client_session` **90%** (closed — task API + not-initialized error path covered by `client_list_tasks_test` + `client_not_initialized_error_test`). | |
 
@@ -130,7 +130,14 @@ clears and CI reproduces the pending rows.
 ## Closure
 
 Closed at iteration 5 on 2026-05-26. CDC verification: pending push + CI.
-Total rows: 19. Done: 18. Pending CI: 1 (P6M1-17). Deferred: 0. No-op: 0.
+Total rows: 19. Done: 19. Deferred: 0. No-op: 0.
+**P6-M1 CLOSED — CDC sign-off 2026-05-27.** All 19 rows done, verified
+independently (structure/greps/diffs by CDC; coverage, dialyzer, CT/eunit/proper
+and the OTP 25–28 matrix by CI). No deferrals, no no-ops, no named ceilings, no
+suppressions. Server/session split + ETS catalog + responder seam + redefined
+transport behaviour landed; per-module coverage ≥90% (total 94%); strict dialyzer
+clean on 27/28 with opacity preserved; registration validation fail-loud across
+the family. Clear to merge `task/0.6.0-p6m1` → `release/0.6.x` and open P6-M2.
 
 **CDC sign-off (iter 5, 2026-05-26):** 18 of 19 rows verified independently at
 `d2238af` — spine + client split sound; per-module coverage genuinely ≥90% via

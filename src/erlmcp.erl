@@ -272,17 +272,15 @@ log_message(Session, Level, Logger, Data) when is_pid(Session), is_atom(Level) -
 %% Convenience setup (M4)
 %%====================================================================
 
--spec start_stdio_setup(atom(), map()) -> {ok, #{server := erlmcp_server:server(), session := pid(), transport := pid()}}.
+-spec start_stdio_setup(atom(), map()) -> {ok, pid()} | {error, term()}.
 start_stdio_setup(ServerId, Config) when is_atom(ServerId) ->
-    {ok, Server} = start_server(ServerId, Config),
-    Responder = maps:get(responder, Config, undefined),
-    {ok, Session} = erlmcp_server_session:start_link(
-        #{server => Server, responder => Responder,
-          name => atom_to_binary(ServerId, utf8)}),
-    TransId = make_transport_id(ServerId, <<"_stdio">>),
-    {ok, Transport} = start_transport(TransId, stdio,
-        #{session => Session, test_mode => maps:get(test_mode, Config, false)}),
-    {ok, #{server => Server, session => Session, transport => Transport}}.
+    SubtreeConfig = Config#{name => atom_to_binary(ServerId, utf8)},
+    case erlmcp_stdio_sup:start_link(SubtreeConfig) of
+        {ok, Sup} ->
+            ok = erlmcp_stdio_sup:serve(Sup),
+            {ok, Sup};
+        Error -> Error
+    end.
 
 -spec start_tcp_setup(atom(), map(), map()) ->
     {ok, #{server := erlmcp_server:server(), session := pid(), transport := pid(), transport_id := atom()}}.

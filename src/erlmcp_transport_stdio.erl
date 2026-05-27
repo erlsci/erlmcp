@@ -1,34 +1,37 @@
 -module(erlmcp_transport_stdio).
 
 -behaviour(gen_server).
+-behaviour(erlmcp_transport).
 
 -include_lib("kernel/include/logger.hrl").
 
-%% Transport behaviour callbacks
--export([send/2, close/1]).
-
-%% API
--export([start_link/2, simulate_input/2, validate_config/1]).
+%% API (serve/1 and close/1 are the erlmcp_transport behaviour callbacks)
+-export([start_link/1, serve/1, close/1, set_session/2,
+         simulate_input/2, validate_config/1]).
 
 %% Testable pure functions
 -export([process_raw_input/1, prepare_line/1]).
 
-%% gen_server callbacks
+%% gen_server callbacks (init/1 also satisfies erlmcp_transport)
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -record(state, {
-    transport_id :: atom(),
     session :: pid() | undefined,
-    reader :: pid() | undefined
+    responder :: erlmcp_reply:responder() | undefined,
+    reader :: pid() | undefined,
+    read_fun :: fun(() -> term()),
+    serving = false :: boolean()
 }).
 
 %%====================================================================
-%% Transport behaviour
+%% erlmcp_transport behaviour
 %%====================================================================
 
--spec send(pid(), iodata()) -> ok | {error, term()}.
-send(Pid, Data) when is_pid(Pid) ->
-    gen_server:call(Pid, {send, Data}).
+%% init/1 is shared with gen_server — see gen_server callbacks below.
+
+-spec serve(pid()) -> ok | {error, term()}.
+serve(Pid) when is_pid(Pid) ->
+    gen_server:call(Pid, serve).
 
 -spec close(pid()) -> ok.
 close(Pid) when is_pid(Pid) ->
@@ -38,14 +41,17 @@ close(Pid) when is_pid(Pid) ->
 %% API
 %%====================================================================
 
--spec start_link(atom(), erlmcp_transport:config()) ->
-    gen_server:start_ret().
-start_link(TransportId, Config) when is_atom(TransportId), is_map(Config) ->
-    gen_server:start_link(?MODULE, {TransportId, Config}, []).
+-spec start_link(erlmcp_transport:config()) -> gen_server:start_ret().
+start_link(Config) when is_map(Config) ->
+    gen_server:start_link(?MODULE, Config, []).
 
 -spec simulate_input(pid(), binary()) -> ok.
 simulate_input(Pid, Line) when is_pid(Pid), is_binary(Line) ->
     gen_server:call(Pid, {simulate_input, Line}).
+
+-spec set_session(pid(), pid()) -> ok.
+set_session(Pid, Session) when is_pid(Pid), is_pid(Session) ->
+    gen_server:call(Pid, {set_session, Session}).
 
 -spec validate_config(map()) -> ok | {error, term()}.
 validate_config(Config) when is_map(Config) ->
@@ -89,30 +95,36 @@ trim_trailing_crlf(Bin) ->
 %% gen_server callbacks
 %%====================================================================
 
-init({TransportId, Config}) ->
+init(Config) ->
     process_flag(trap_exit, true),
     Session = maps:get(session, Config, undefined),
+    Responder = case Session of
+        undefined -> undefined;
+        _ -> erlmcp_reply:new_device(self())
+    end,
     ReadFun = maps:get(read_fun, Config, fun default_read/0),
     State = #state{
-        transport_id = TransportId,
-        session = Session
+        session = Session,
+        responder = Responder,
+        read_fun = ReadFun
     },
-    case maps:get(test_mode, Config, false) of
-        true ->
-            {ok, State};
-        false ->
-            Self = self(),
-            ReaderPid = spawn_link(fun() -> read_loop(Self, ReadFun) end),
-            {ok, State#state{reader = ReaderPid}}
-    end.
+    {ok, State}.
 
-handle_call({send, Data}, _From, State) ->
-    Result = write_stdout(Data),
-    {reply, Result, State};
+handle_call(serve, _From, #state{serving = true} = State) ->
+    {reply, {error, already_serving}, State};
+handle_call(serve, _From, #state{serving = false} = State) ->
+    Self = self(),
+    ReaderPid = spawn_link(fun() -> read_loop(Self, State#state.read_fun) end),
+    {reply, ok, State#state{reader = ReaderPid, serving = true}};
 
-handle_call({simulate_input, Line}, _From, #state{session = Session} = State)
+handle_call({set_session, Session}, _From, State) ->
+    Responder = erlmcp_reply:new_device(self()),
+    {reply, ok, State#state{session = Session, responder = Responder}};
+
+handle_call({simulate_input, Line}, _From, #state{session = Session,
+                                                    responder = Responder} = State)
   when is_pid(Session) ->
-    Session ! {transport_data, Line},
+    Session ! {transport_data, Line, Responder},
     {reply, ok, State};
 
 handle_call(_Request, _From, State) ->
@@ -125,22 +137,20 @@ handle_info({send, Data}, State) ->
     _ = write_stdout(Data),
     {noreply, State};
 
-handle_info({line, Line}, #state{session = Session} = State)
+handle_info({line, Line}, #state{session = Session, responder = Responder} = State)
   when is_pid(Session) ->
-    ?LOG_DEBUG("stdio transport: forwarding line to session ~p: ~p", [Session, Line]),
-    Session ! {transport_data, Line},
+    Session ! {transport_data, Line, Responder},
     {noreply, State};
 
 handle_info({'EXIT', Pid, normal}, #state{reader = Pid} = State) ->
-    {noreply, State#state{reader = undefined}};
+    {stop, normal, State#state{reader = undefined}};
 
 handle_info({'EXIT', Pid, Reason}, #state{reader = Pid} = State) ->
-    logger:error("stdio reader died: ~p", [Reason]),
+    ?LOG_ERROR("stdio reader exited: ~p", [Reason]),
     {stop, {reader_died, Reason}, State};
 
 handle_info(Info, State) ->
-    ?LOG_DEBUG("stdio transport: unhandled info ~p (session=~p)",
-               [Info, State#state.session]),
+    ?LOG_DEBUG("stdio transport: unhandled info ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, #state{reader = Pid}) when is_pid(Pid) ->
@@ -153,10 +163,6 @@ terminate(_Reason, _State) ->
 %% Internal
 %%====================================================================
 
-%% Route protocol I/O to the `user` I/O server explicitly, not the
-%% process group leader. Under the application supervisor tree the
-%% group leader is the application master (not real stdio); `user` is
-%% the registered I/O server bound to fd 0/1 under `erl -noshell`.
 -spec write_stdout(iodata()) -> ok | {error, term()}.
 write_stdout(Data) ->
     try
@@ -171,13 +177,10 @@ default_read() ->
 
 read_loop(Parent, ReadFun) ->
     Raw = ReadFun(),
-    ?LOG_DEBUG("stdio reader: raw input ~p", [Raw]),
     case process_raw_input(Raw) of
         eof ->
-            ?LOG_DEBUG("stdio reader: eof", []),
             exit(normal);
         {error, Reason} ->
-            ?LOG_DEBUG("stdio reader: read error ~p", [Reason]),
             exit({read_error, Reason});
         {deliver, Data} ->
             deliver_line(Parent, Data),
@@ -186,11 +189,8 @@ read_loop(Parent, ReadFun) ->
 
 deliver_line(Parent, RawLine) ->
     case prepare_line(RawLine) of
-        skip ->
-            ?LOG_DEBUG("stdio reader: skipping blank line", []),
-            ok;
+        skip -> ok;
         {send, Trimmed} ->
-            ?LOG_DEBUG("stdio reader: delivering line ~p", [Trimmed]),
             Parent ! {line, Trimmed},
             ok
     end.

@@ -15,8 +15,8 @@
 -type state() :: term().
 
 %% Lifecycle callbacks
--callback init(Config :: config()) ->
-    {ok, state()} | {error, term()}.
+%% init/1 is satisfied by the gen_server callback — not declared here
+%% to avoid a conflicting-behaviours warning.
 
 -callback serve(state()) ->
     {ok, state()} | {error, term()}.
