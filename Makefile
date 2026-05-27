@@ -32,8 +32,19 @@ test:
 	@$(REBAR) proper -c
 	@$(REBAR) as test cover -v --min_coverage=90
 
+# Dialyzer's opaque-type analysis is only reliable on OTP 27+; OTP 25/26 emit
+# known false positives on opaque pid() aliases. Gate the type check to 27+ so
+# it runs where it's trustworthy, while compile/xref/test still cover the full
+# 25–28 matrix. The OTP version is detected at run time, so this one target
+# governs both local `make check` and CI (which calls `make dialyzer`) — no CI
+# matrix split needed, local and CI stay identical.
 dialyzer:
-	@$(REBAR) dialyzer
+	@otp=$$(erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().' 2>/dev/null); \
+	if [ "$$otp" -ge 27 ] 2>/dev/null; then \
+		$(REBAR) dialyzer; \
+	else \
+		echo "dialyzer: skipped on OTP $$otp (gated to 27+; 25/26 have opaque false positives)"; \
+	fi
 
 xref:
 	@$(REBAR) xref
