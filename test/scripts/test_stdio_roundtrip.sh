@@ -46,12 +46,20 @@ for example in "${EXAMPLES[@]}"; do
         sleep 10
     } | timeout 25 bash "$SCRIPT" >"$out" 2>"$err" || true
 
-    # First line that looks like a JSON-RPC message; tolerate stray output before it.
+    # P6M2-7/P6M2-10: the FIRST non-blank line on stdout MUST parse as JSON.
+    # No Exec:/Root:/path preamble, no =INFO/=PROGRESS/=CRASH reports.
+    first_line="$(head -1 "$out" 2>/dev/null || true)"
     resp="$(grep -m1 '"jsonrpc"' "$out" 2>/dev/null || true)"
-    if [ -n "$resp" ] && printf '%s' "$resp" | python3 -c \
+    if [ -z "$first_line" ]; then
+        echo "FAIL: $example — no output on stdout."
+        fail=$((fail + 1))
+    elif ! printf '%s' "$first_line" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+        echo "FAIL: $example — first stdout line is not JSON: ${first_line:0:80}"
+        fail=$((fail + 1))
+    elif [ -n "$resp" ] && printf '%s' "$resp" | python3 -c \
         "import sys,json; d=json.load(sys.stdin); assert d.get('jsonrpc')=='2.0' and ('result' in d or 'error' in d)" \
         2>/dev/null; then
-        echo "PASS: $example — valid JSON-RPC response"
+        echo "PASS: $example — valid JSON-RPC response, clean stdout"
         pass=$((pass + 1))
     else
         echo "FAIL: $example — no valid JSON-RPC response on stdout."
