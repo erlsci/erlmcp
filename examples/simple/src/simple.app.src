@@ -1,0 +1,9 @@
+{application, simple, [
+    {description, "Minimal erlmcp MCP server (stdio)"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {simple_app, []}},
+    {applications, [kernel, stdlib, erlmcp]},
+    {start_phases, [{serve, []}]},
+    {env, []}
+]}.

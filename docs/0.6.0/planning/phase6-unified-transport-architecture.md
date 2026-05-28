@@ -242,13 +242,25 @@ config-driven into the server; add the cheap **outbound UTF-8 well-formedness
 guard** at the emit/codec boundary. **Exit:** spine unit + property tested;
 dialyzer clean; coverage gate holds over the new/refactored modules.
 
-### P6-M2 — stdio on the new shape
-**Goal:** the first transport fully working on the correct architecture. Rebuild
-`erlmcp_transport_stdio` against the responder seam; fold server + session +
-transport into a **per-server subtree**; add the `serve/1` gate. The startup race
-closes structurally. **Exit:** round-trip subprocess test green; a "register N,
-`*/list` returns N" conformance test green; `initialize → ping → tools/list →
-tools/call → cancel` end-to-end over stdio.
+### P6-M2 — stdio on the new shape (+ the 100% OTP launcher)
+**Goal:** the first transport fully working **and launchable for testing** on the
+correct architecture. Rebuild `erlmcp_transport_stdio` against the responder seam;
+fold server + session + transport into a **per-server subtree**; add the `serve/1`
+gate. The startup race closes structurally.
+
+**Launcher (moved here from the old M5/M6 plan — testability is a prerequisite):**
+stdio is not "working" until we can launch it to test it, and the launcher must be
+**100% OTP** — the supervision tree owned by an **application controller**, not a
+transient `erl -eval` process (which silently kills the tree on return). Build
+`simple` as a proper OTP **application** (`{mod, …}` + `start_phases` `serve`) +
+a **relx release** with `-noshell` (not `-noinput`) vm.args; `run.sh` boots the
+release. The app is `permanent`, so stdin EOF → subtree down → node halt, the
+OTP way. `simple` is the **reference**; calculator/weather clone it in P6-M5.
+
+**Exit:** round-trip subprocess test green **against the release-launched
+`simple`**; a "register N, `*/list` returns N" conformance test green; `initialize
+→ ping → tools/list → tools/call → cancel` end-to-end over stdio; clean node exit
+on stdin EOF; the `-noshell` vm.args recipe documented.
 
 ### P6-M3 — Streamable HTTP via Cowboy
 **Goal:** the second transport, proving the abstraction generalizes. Add cowboy
@@ -271,14 +283,16 @@ or raise an amendment (do not swap jesse — locked).
 
 ### P6-M5 — Examples rehabilitation + Claude Desktop acceptance
 **Goal:** the example servers on the new API, validated against a real client.
-Rewrite `simple`/`calculator`/`weather` onto `erlmcp_server` + sessions +
-config-driven setup; run the per-example acceptance matrix; attach Claude Desktop
-to **both** stdio and HTTP servers.
+`simple` is already an OTP application + release (the reference built in P6-M2);
+here, **clone that template** to rehab `calculator`/`weather` as OTP apps +
+releases onto `erlmcp_server` + sessions + config-driven setup. Run the per-example
+acceptance matrix; attach Claude Desktop to **both** stdio and HTTP servers.
 
 ### P6-M6 — Howto + release mechanics
 **Goal:** the `docs/creating-an-mcp-server.md` greenfield tutorial (the howto idea
 bank), now able to teach the correct architecture — both transports, the
-`serve/1` gate, and `start_phases` at the release layer — then the mechanical
+`serve/1` gate, and `start_phases` at the release layer (the `-noshell` release
+recipe is already proven and documented in P6-M2, §4.4 seed) — then the mechanical
 release: merge task branches → `release/0.6.x` → `main`, tag 0.6.0, publish notes.
 
 ### Dependency order
@@ -288,6 +302,13 @@ takes on HTTP. M4 is transport-agnostic and could move earlier ("validate at the
 edge from day one"); it is placed after the transports because the highest-value
 test is "does a real client accept our payloads," which needs them — but the cheap
 outbound UTF-8 guard lands in M1 regardless. M5/M6 are the release runway.
+
+**Shift (2026-05-27):** the OTP application/release **launcher** moved *forward*
+into M2 (originally implied in M5/M6). Reason: the `erl -eval` launcher killed the
+application-unowned supervision tree on return, so stdio could not be tested at all
+— and an untestable transport cannot be signed off or built upon. M2 now builds
+**one** reference app+release (`simple`); M5 is correspondingly lighter (clone the
+template to calculator/weather); M6 documents the already-proven recipe.
 
 ## 7. Disposition of the existing tree
 

@@ -143,7 +143,7 @@ handle_info({line, Line}, #state{session = Session, responder = Responder} = Sta
     {noreply, State};
 
 handle_info({'EXIT', Pid, normal}, #state{reader = Pid} = State) ->
-    {stop, normal, State#state{reader = undefined}};
+    {noreply, State#state{reader = undefined}};
 
 handle_info({'EXIT', Pid, Reason}, #state{reader = Pid} = State) ->
     ?LOG_ERROR("stdio reader exited: ~p", [Reason]),

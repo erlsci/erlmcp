@@ -6,6 +6,7 @@
 %%   - Full discoverability (wayfinding, directory tool)
 
 -export([start/0, start/1, register_all/1]).
+-export([tools/0, resources/0, prompts/0]).
 
 -spec start() -> {ok, pid()} | {error, term()}.
 start() ->
