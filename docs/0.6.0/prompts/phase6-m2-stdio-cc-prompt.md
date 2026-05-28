@@ -13,8 +13,8 @@ You are CC, implementing erlmcp 0.6.0. This task is **P6-M2 only**: rebuild the
 the `erlmcp_reply` responder), start it **paused** behind a `serve/1` gate, fold
 server + session + transport into a **per-server subtree**, and make
 `start_stdio_setup/2` build-then-serve so the catalog is complete before a byte is
-read. No HTTP/Cowboy (P6-M3), no full example rehab (P6-M5), no jesse payload
-validation (P6-M4).
+read. No HTTP/Cowboy (P6-M4), no full example rehab (P6-M6), no jesse payload
+validation (P6-M5), no discoverability enrichment (P6-M3).
 
 ## Read before writing any code (in this order)
 
@@ -102,10 +102,12 @@ validation (P6-M4).
 ## Out of scope for P6-M2 (do NOT build)
 
 - HTTP/Cowboy, the session manager, SSE/resumability, the `{http,_,_}`/`{sse,_}`
-  responder kinds — **P6-M3**.
-- Full example rehabilitation — **P6-M5** (a minimal config-driven fixture for the
+  responder kinds — **P6-M4**.
+- Full example rehabilitation — **P6-M6** (a minimal config-driven fixture for the
   round-trip test is fine; rewriting calculator/weather is not).
-- jesse/MCP-schema payload validation — **P6-M4**.
+- jesse/MCP-schema payload validation — **P6-M5**.
+- Discoverability enrichment (instructions, server block, `protocol_features`) —
+  **P6-M3** (machinery) + **P6-M6** (example content).
 
 ## Done when
 

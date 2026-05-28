@@ -90,8 +90,8 @@ start_transport(TransportId, Type) ->
 
 -spec start_transport(transport_id(), transport_type(), map()) ->
     gen_server:start_ret() | {error, term()}.
-start_transport(TransportId, stdio, Config) ->
-    erlmcp_transport_stdio:start_link(TransportId, Config);
+start_transport(_TransportId, stdio, Config) ->
+    erlmcp_transport_stdio:start_link(Config);
 start_transport(_TransportId, Type, _Config) ->
     {error, {transport_not_implemented, Type}}.
 

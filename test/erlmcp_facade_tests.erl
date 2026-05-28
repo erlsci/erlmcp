@@ -292,12 +292,16 @@ notify_resource_updated_test() ->
     gen_server:stop(Server).
 
 start_stdio_setup_test() ->
-    {ok, #{server := Server, transport := Transport}} =
-        erlmcp:start_stdio_setup(setup_test_srv, #{test_mode => true}),
-    ?assert(is_process_alive(Server)),
-    ?assert(is_process_alive(Transport)),
-    erlmcp_transport_stdio:close(Transport),
-    gen_server:stop(Server).
+    {ok, Sup} = erlmcp:start_stdio_setup(setup_test_srv, #{
+        tools => [#{name => <<"t">>, description => <<"t">>,
+                    handler => fun(_, _) -> {ok, [#{<<"type">> => <<"text">>, <<"text">> => <<"ok">>}]} end}]
+    }),
+    ?assert(is_process_alive(Sup)),
+    Children = supervisor:which_children(Sup),
+    ?assert(length(Children) >= 3),
+    unlink(Sup),
+    exit(Sup, shutdown),
+    timer:sleep(50).
 
 stop_server_dead_process_test() ->
     {ok, _} = application:ensure_all_started(erlmcp),

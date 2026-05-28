@@ -35,43 +35,58 @@ prepare_line_blank_test() ->
     ?assertEqual(skip, erlmcp_transport_stdio:prepare_line(<<>>)).
 
 %%====================================================================
-%% gen_server — test_mode (no I/O)
+%% gen_server — paused start (no reader until serve)
 %%====================================================================
 
 start_stop_test() ->
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
-        session => self(), test_mode => true
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
+        session => self()
     }),
     ?assert(is_process_alive(Pid)),
     erlmcp_transport_stdio:close(Pid).
 
-send_test() ->
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
-        session => self(), test_mode => true
+serve_starts_reader_test() ->
+    Counter = atomics:new(1, [{signed, false}]),
+    ReadFun = fun() ->
+        case atomics:add_get(Counter, 1, 1) of
+            1 -> "hello\n";
+            _ -> eof
+        end
+    end,
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
+        session => self(), read_fun => ReadFun
     }),
-    ok = erlmcp_transport_stdio:send(Pid, <<"hello">>),
+    ok = erlmcp_transport_stdio:set_session(Pid, self()),
+    ok = erlmcp_transport_stdio:serve(Pid),
+    receive {transport_data, <<"hello">>, _Responder} -> ok
+    after 2000 -> ?assert(false) end,
     erlmcp_transport_stdio:close(Pid).
 
 simulate_input_test() ->
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        name => <<"test">>, version => <<"1.0">>, capabilities => #{}
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"test">>, version => <<"1.0">>
     }),
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
-        session => Server, test_mode => true
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{}),
+    Responder = erlmcp_reply:new_device(Pid),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"test">>, version => <<"1.0">>
     }),
+    ok = erlmcp_transport_stdio:set_session(Pid, Session),
     InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
     ok = erlmcp_transport_stdio:simulate_input(Pid, InitReq),
     timer:sleep(100),
-    ?assertEqual(operational, gen_statem:call(Server, get_state)),
+    ?assertEqual(operational, gen_statem:call(Session, get_state)),
     erlmcp_transport_stdio:close(Pid),
-    gen_statem:stop(Server).
+    gen_statem:stop(Session),
+    gen_server:stop(Srv).
 
 outbound_via_info_test() ->
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
-        session => self(), test_mode => true
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
+        session => self()
     }),
     Pid ! {send, <<"outbound data">>},
     timer:sleep(50),
@@ -79,11 +94,12 @@ outbound_via_info_test() ->
     erlmcp_transport_stdio:close(Pid).
 
 line_delivery_test() ->
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
-        session => self(), test_mode => true
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
+        session => self()
     }),
+    ok = erlmcp_transport_stdio:set_session(Pid, self()),
     Pid ! {line, <<"hello">>},
-    receive {transport_data, <<"hello">>} -> ok
+    receive {transport_data, <<"hello">>, _Responder} -> ok
     after 1000 -> ?assert(false)
     end,
     erlmcp_transport_stdio:close(Pid).
@@ -94,15 +110,15 @@ validate_config_test() ->
     ?assertMatch({error, _}, erlmcp_transport_stdio:validate_config(not_a_map)).
 
 unknown_call_test() ->
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
-        session => self(), test_mode => true
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
+        session => self()
     }),
     ?assertMatch({error, _}, gen_server:call(Pid, unknown_request)),
     erlmcp_transport_stdio:close(Pid).
 
 unknown_cast_test() ->
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
-        session => self(), test_mode => true
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
+        session => self()
     }),
     gen_server:cast(Pid, unknown),
     timer:sleep(50),
@@ -110,17 +126,17 @@ unknown_cast_test() ->
     erlmcp_transport_stdio:close(Pid).
 
 unknown_info_test() ->
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
-        session => self(), test_mode => true
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
+        session => self()
     }),
     Pid ! unknown_message,
     timer:sleep(50),
     ?assert(is_process_alive(Pid)),
     erlmcp_transport_stdio:close(Pid).
 
-terminate_test_mode_test() ->
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
-        session => self(), test_mode => true
+terminate_no_reader_test() ->
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
+        session => self()
     }),
     Ref = monitor(process, Pid),
     erlmcp_transport_stdio:close(Pid),
@@ -129,7 +145,7 @@ terminate_test_mode_test() ->
     end.
 
 %%====================================================================
-%% Injected reader — exercises read_loop, deliver_line, EXIT handlers
+%% Injected reader — exercises read_loop via serve/1
 %%====================================================================
 
 reader_delivers_lines_test() ->
@@ -141,13 +157,15 @@ reader_delivers_lines_test() ->
             _ -> eof
         end
     end,
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
         session => self(), read_fun => ReadFun
     }),
+    ok = erlmcp_transport_stdio:set_session(Pid, self()),
+    ok = erlmcp_transport_stdio:serve(Pid),
     unlink(Pid),
-    receive {transport_data, <<"hello world">>} -> ok
+    receive {transport_data, <<"hello world">>, _} -> ok
     after 2000 -> ?assert(false) end,
-    receive {transport_data, <<"binary line">>} -> ok
+    receive {transport_data, <<"binary line">>, _} -> ok
     after 2000 -> ?assert(false) end,
     timer:sleep(100),
     ?assert(is_process_alive(Pid)),
@@ -162,20 +180,23 @@ reader_skips_blank_lines_test() ->
             _ -> eof
         end
     end,
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
         session => self(), read_fun => ReadFun
     }),
+    ok = erlmcp_transport_stdio:set_session(Pid, self()),
+    ok = erlmcp_transport_stdio:serve(Pid),
     unlink(Pid),
-    receive {transport_data, <<"real">>} -> ok
+    receive {transport_data, <<"real">>, _} -> ok
     after 2000 -> ?assert(false) end,
     timer:sleep(100),
     erlmcp_transport_stdio:close(Pid).
 
 reader_error_stops_transport_test() ->
     ReadFun = fun() -> {error, eio} end,
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
         session => self(), read_fun => ReadFun
     }),
+    ok = erlmcp_transport_stdio:serve(Pid),
     unlink(Pid),
     Ref = monitor(process, Pid),
     receive {'DOWN', Ref, process, Pid, {reader_died, {read_error, eio}}} -> ok
@@ -184,9 +205,10 @@ reader_error_stops_transport_test() ->
 
 reader_eof_graceful_test() ->
     ReadFun = fun() -> eof end,
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
         session => self(), read_fun => ReadFun
     }),
+    ok = erlmcp_transport_stdio:serve(Pid),
     unlink(Pid),
     timer:sleep(100),
     ?assert(is_process_alive(Pid)),
@@ -194,14 +216,22 @@ reader_eof_graceful_test() ->
 
 terminate_kills_reader_test() ->
     ReadFun = fun() -> receive after 60000 -> eof end end,
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_stdio, #{
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
         session => self(), read_fun => ReadFun
     }),
+    ok = erlmcp_transport_stdio:serve(Pid),
     unlink(Pid),
-    timer:sleep(50),
     Ref = monitor(process, Pid),
     erlmcp_transport_stdio:close(Pid),
     receive {'DOWN', Ref, process, Pid, _} -> ok
     after 2000 -> ?assert(false)
     end.
 
+already_serving_test() ->
+    ReadFun = fun() -> receive after 60000 -> eof end end,
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
+        session => self(), read_fun => ReadFun
+    }),
+    ok = erlmcp_transport_stdio:serve(Pid),
+    ?assertEqual({error, already_serving}, erlmcp_transport_stdio:serve(Pid)),
+    erlmcp_transport_stdio:close(Pid).

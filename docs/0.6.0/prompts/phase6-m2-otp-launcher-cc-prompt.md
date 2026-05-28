@@ -101,9 +101,10 @@ does; CDC/Duncan decide the OTP-correct resolution.
 
 ## Out of scope
 
-- `calculator`/`weather` full app+release conversion — **P6-M5**, cloning this
+- `calculator`/`weather` full app+release conversion — **P6-M6**, cloning this
   `simple` reference as the template. Do **only** `simple` here.
-- HTTP/Cowboy (**P6-M3**); jesse payload validation (**P6-M4**).
+- HTTP/Cowboy (**P6-M4**); jesse payload validation (**P6-M5**); discoverability
+  enrichment (**P6-M3**).
 
 ## Done when
 

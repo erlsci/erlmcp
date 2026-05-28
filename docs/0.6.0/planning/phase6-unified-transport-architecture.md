@@ -96,7 +96,7 @@ go-live gate) rather than with a point-fix.
   no shared records across boundaries; one way to do a thing, no `_new` forks; no
   hand-maintained CHANGELOG.
 - **New accepted dependency:** `cowboy` (and its `ranch` dependency), introduced
-  in P6-M3. This is an amendment to the dependency set (previously `jsx` +
+  in P6-M4. This is an amendment to the dependency set (previously `jsx` +
   `jesse`); recorded here and in the M3 ledger.
 
 ## 3. Target architecture
@@ -226,7 +226,7 @@ monitor we add is the session manager watching its sessions to prune its map.
 
 ## 6. Milestones (engineering order)
 
-Phase 6 milestones are labelled **P6-M1 … P6-M6** to avoid collision with the
+Phase 6 milestones are labelled **P6-M1 … P6-M7** to avoid collision with the
 original 0.6.0 M0–M6b. Each gets its own ledger + CC prompt when it begins (the
 repo's per-milestone convention); only P6-M1 is fully specified up front.
 
@@ -255,14 +255,47 @@ transient `erl -eval` process (which silently kills the tree on return). Build
 `simple` as a proper OTP **application** (`{mod, …}` + `start_phases` `serve`) +
 a **relx release** with `-noshell` (not `-noinput`) vm.args; `run.sh` boots the
 release. The app is `permanent`, so stdin EOF → subtree down → node halt, the
-OTP way. `simple` is the **reference**; calculator/weather clone it in P6-M5.
+OTP way. `simple` is the **reference**; calculator/weather clone it in P6-M6.
 
 **Exit:** round-trip subprocess test green **against the release-launched
 `simple`**; a "register N, `*/list` returns N" conformance test green; `initialize
 → ping → tools/list → tools/call → cancel` end-to-end over stdio; clean node exit
 on stdin EOF; the `-noshell` vm.args recipe documented.
 
-### P6-M3 — Streamable HTTP via Cowboy
+### P6-M3 — Discoverability enhancement
+**Goal:** make the existing discoverability layer (already-populated
+`InitializeResult.instructions` + the `directory` tool + per-tool metadata)
+**README-grade on first contact.** Closes the gap CD found in
+`workbench/erlmcp-discoverability-assessment.md` (and reconciled in
+`docs/0.6.0/planning/phase6-discoverability-plan.md`): the spec-blessed slot is
+already filled but emits a thin "Categories: …. Use tools/list." string, and the
+rich per-tool semantics (`when_to_use`/`next`/protocol-feature notes) live one
+tool-call deep instead of at the handshake.
+
+**Scope — library *machinery* only; example content lands in P6-M6.**
+- Enrich `erlmcp_instructions:generate/_` to README-grade output: server identity
+  (name, purpose, version, source URL), category overview, entry points, **protocol
+  features exercised** (sampling / tasks / progress), and an explicit pointer to
+  the `directory` tool. Accept an author-supplied override.
+- Add a **server-level identity block** to the `directory` tool's output (name,
+  purpose, version, source, protocol features, docs pointer).
+- Add a first-class **`protocol_features`** field per tool (promote
+  `(exercises sampling)`-style notes out of `when_to_use` prose into a structured,
+  prominent field).
+- Tighten the `directory` tool's own description so its "start here / I'm the
+  README" role is unmissable.
+
+**Depends on:** CD verifying that Claude Desktop actually surfaces
+`InitializeResult.instructions` to the model (the gating check in
+`phase6-discoverability-plan.md` §1). If it doesn't, leverage shifts onto
+descriptions + `directory`, but the machinery changes here still apply.
+
+**Exit:** the machinery produces README-grade `instructions` from a server that
+supplies identity + `protocol_features`; `directory`'s output carries a server
+identity block + per-tool `protocol_features`; unit/CT coverage holds the new
+fields; dialyzer clean on 27/28; `make check` green.
+
+### P6-M4 — Streamable HTTP via Cowboy
 **Goal:** the second transport, proving the abstraction generalizes. Add cowboy
 (deps amendment); per-server listener; the POST/GET/DELETE endpoint handler;
 `erlmcp_http_session_mgr`; the SSE responder adapter with event ids + bounded
@@ -271,7 +304,7 @@ multi-client correctness (responses correlate to the originating connection); SS
 resume after a dropped stream; session expiry and DELETE; both transports green
 on one shared spine.
 
-### P6-M4 — Strict payload validation
+### P6-M5 — Strict payload validation
 **Goal:** the handoff §2 work on the now-stable shared edge. Generate a JSON
 Schema from `schema.ts` (protocol 2025-11-25) + the SHOULD⇒MUST overlay; wire
 `jesse` inbound (→ `-32600`/`-32602`) and outbound (fail closed); the
@@ -281,14 +314,14 @@ check (from P6-M1) is formalized here. **Note:** jesse is draft-04/06 and the
 generator emits draft-07 (`const`/`anyOf`) — verify jesse digests it on OTP 25–28
 or raise an amendment (do not swap jesse — locked).
 
-### P6-M5 — Examples rehabilitation + Claude Desktop acceptance
+### P6-M6 — Examples rehabilitation + Claude Desktop acceptance
 **Goal:** the example servers on the new API, validated against a real client.
 `simple` is already an OTP application + release (the reference built in P6-M2);
 here, **clone that template** to rehab `calculator`/`weather` as OTP apps +
 releases onto `erlmcp_server` + sessions + config-driven setup. Run the per-example
 acceptance matrix; attach Claude Desktop to **both** stdio and HTTP servers.
 
-### P6-M6 — Howto + release mechanics
+### P6-M7 — Howto + release mechanics
 **Goal:** the `docs/creating-an-mcp-server.md` greenfield tutorial (the howto idea
 bank), now able to teach the correct architecture — both transports, the
 `serve/1` gate, and `start_phases` at the release layer (the `-noshell` release
@@ -296,19 +329,28 @@ recipe is already proven and documented in P6-M2, §4.4 seed) — then the mecha
 release: merge task branches → `release/0.6.x` → `main`, tag 0.6.0, publish notes.
 
 ### Dependency order
-P6-M1 is the keystone (M2, M3, M5 all assume cheap, per-client, catalog-free
-sessions). M2 proves the spine end-to-end on the simpler transport before M3
-takes on HTTP. M4 is transport-agnostic and could move earlier ("validate at the
-edge from day one"); it is placed after the transports because the highest-value
-test is "does a real client accept our payloads," which needs them — but the cheap
-outbound UTF-8 guard lands in M1 regardless. M5/M6 are the release runway.
+P6-M1 is the keystone (M2, M3, M4, M6 all assume cheap, per-client, catalog-free
+sessions). M2 proves the spine end-to-end on the simpler transport. M3 enriches
+the discoverability machinery (library only; no transport coupling), so the
+examples in M6 have a README-grade `instructions`/`directory` to populate. M4
+takes on HTTP. M5 (strict payload validation) is transport-agnostic and could
+move earlier ("validate at the edge from day one"); it is placed after the
+transports because the highest-value test is "does a real client accept our
+payloads," which needs them — but the cheap outbound UTF-8 guard lands in M1
+regardless. M6/M7 are the release runway.
 
-**Shift (2026-05-27):** the OTP application/release **launcher** moved *forward*
-into M2 (originally implied in M5/M6). Reason: the `erl -eval` launcher killed the
-application-unowned supervision tree on return, so stdio could not be tested at all
-— and an untestable transport cannot be signed off or built upon. M2 now builds
-**one** reference app+release (`simple`); M5 is correspondingly lighter (clone the
-template to calculator/weather); M6 documents the already-proven recipe.
+**Shift (2026-05-27):** two changes to the original ordering.
+(a) The OTP application/release **launcher** moved *forward* into M2 (originally
+implied in the old M5/M6). Reason: the `erl -eval` launcher killed the
+application-unowned supervision tree on return, so stdio could not be tested at
+all — and an untestable transport cannot be signed off or built upon. M2 now
+builds **one** reference app+release (`simple`); M6 is correspondingly lighter
+(clone the template to calculator/weather); M7 documents the already-proven
+recipe.
+(b) A new **P6-M3 — Discoverability enhancement** was inserted, after a CD
+consumer-side assessment showed the spec-blessed `instructions` slot was populated
+but thin. The rest of Phase 6 renumbered up by one (old M3/M4/M5/M6 →
+M4/M5/M6/M7). Source: `docs/0.6.0/planning/phase6-discoverability-plan.md`.
 
 ## 7. Disposition of the existing tree
 

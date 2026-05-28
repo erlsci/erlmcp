@@ -43,7 +43,7 @@ spec promises `ok | {error,_}` but `erlmcp_server:register_tool/2` can't fail �
 i.e. registration silently accepts malformed tool specs. Fix the **code, not the
 spec**: add registration-time validation in `erlmcp_server:register_tool/2`
 (required keys present + correct types — proportionate structural validation,
-*not* full MCP-schema/jesse validation, which is P6-M4), returning
+*not* full MCP-schema/jesse validation, which is P6-M5), returning
 `{error, {invalid_tool_spec, Reason}}` on bad input. Fail loud at registration,
 not at protocol time — this closes the silent-acceptance class that caused the
 original icon/`taskSupport` bugs.

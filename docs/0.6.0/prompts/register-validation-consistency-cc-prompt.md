@@ -24,7 +24,7 @@ For each: validate the spec **before** the `gen_server:call`, returning
    alongside `validate_tool_spec/1`. Keep the **same depth of rigor** as
    `validate_tool_spec/1` — proportionate **structural** validation (required keys
    present + correct types). This is *not* MCP-schema/jesse payload validation —
-   that's P6-M4.
+   that's P6-M5.
 
 2. **Required keys** per the MCP model — confirm against `erlmcp_model` / the
    schema rather than guessing, but expected to be roughly: resource → `uri`;

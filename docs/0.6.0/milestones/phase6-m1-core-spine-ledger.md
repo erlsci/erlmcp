@@ -117,9 +117,11 @@ clears and CI reproduces the pending rows.
 
 - Per-server subtree supervisor + `serve/1` go-live gate + stdio rebuild → **P6-M2**.
 - `{http, ConnPid, ReqRef}` / `{sse, StreamPid}` responder kinds + session manager +
-  SSE resumability → **P6-M3**.
-- Full inbound/outbound JSON-Schema validation via jesse → **P6-M4**.
-- Example-server rehabilitation (onto `erlmcp_server` + config-driven setup) → **P6-M5**.
+  SSE resumability → **P6-M4**.
+- Full inbound/outbound JSON-Schema validation via jesse → **P6-M5**.
+- Example-server rehabilitation (onto `erlmcp_server` + config-driven setup) → **P6-M6**.
+  (Phase 6 was renumbered 2026-05-27: new P6-M3 = discoverability machinery; old
+  M3/M4/M5/M6 → M4/M5/M6/M7.)
 - Total aggregate coverage (82%) is below 90% due to non-P6M1 modules
   (`erlmcp_client_session` 50%, `erlmcp_transport_streamable_http` 43%,
   `erlmcp_registry` 76%, `erlmcp` facade 48%). These are addressed by M3/M5.

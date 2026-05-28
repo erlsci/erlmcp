@@ -103,15 +103,14 @@ completion demo. One sentence each, plus a top-level note tying them together.
 - **Now (CD):** the §1 gating check. Plus a free quick win — even the *current* thin
   instructions say "Use tools/list" instead of "call `directory`"; flipping that one
   pointer is a one-line, high-value change.
-- **Core machinery (A, B, C-core, D-core):** a focused unit — the discoverability
-  *machinery* enrichment. It's library work and a prerequisite for the examples to
-  demonstrate it. Small enough to ride as a dedicated milestone (P6-M-disc) or fold
-  into the front of **P6-M5**; CDC's lean: do the core machinery as its own short
-  pass so M5's example work just *populates* it.
-- **Example content (C-example, D-example, E):** **P6-M5** (examples rehabilitation)
+- **Core machinery (A, B, C-core, D-core):** the new **P6-M3 — Discoverability
+  enhancement** (decision 2026-05-27; the rest of Phase 6 renumbered up by one to
+  accommodate). Library work and a prerequisite for the examples to demonstrate it,
+  so it lands before HTTP/validation/examples.
+- **Example content (C-example, D-example, E):** **P6-M6** (examples rehabilitation)
   — the examples supply identity/purpose/source values, the `protocol_features`
   flags, the orientation descriptions, and the READMEs.
-- **Teach it:** **P6-M6** (the `creating-an-mcp-server.md` howto) — a "make your
+- **Teach it:** **P6-M7** (the `creating-an-mcp-server.md` howto) — a "make your
   server discoverable" section: populate `instructions`, the `directory` tool,
   per-tool `when_to_use`/`next`/`protocol_features`, server identity.
 
