@@ -47,27 +47,46 @@ permanent app terminates → **node shuts down cleanly**. No explicit `halt` —
 `rebar.config` (under the `simple` profile): release name `simple`, apps
 `[erlmcp, simple]`, bundling `config/sys.config` and a `vm.args`.
 
-**6. The vm.args / boot detail — nail this deliberately (it's the make-or-break).**
-The release VM must run with **`-noshell`** (no Erlang shell competing for stdin or
-polluting stdout) but **not `-noinput`** (the transport must read stdin), with
-`user` bound to fd 0/1. Release `foreground` does not default to this — set it
-explicitly in `vm.args` and verify the transport actually reads piped stdin.
-**Document the exact args** you land on (this is the recipe the howto, §4.4, will
-capture).
+**6. Eliminate the `Exec:`/`Root:` stdout pollution from the launcher.** Empirical
+status (verified via Claude Desktop, which round-trips tool calls today): the
+release launches, `vm.args` correctly sets **`-noshell`** (not `-noinput`), and the
+`io:get_line(user, "")` reader gets stdin — **the servers work.** The *only*
+residual defect is that `bin/<rel> foreground` **echoes `Exec:`/`Root:` to stdout**
+before exec (~lines 988–996, "Dump environment info"). Those non-JSON lines are the
+"Unexpected token 'E', \"Exec: /opt\"…" parse errors Claude Desktop shows at
+startup. Claude Desktop *tolerates* them (logs the errors, then reads the real
+JSON-RPC) — but a stricter MCP client would reject the connection on that preamble,
+and it violates "stdout carries protocol bytes only" (§1.1). So clean it.
 
-**7. `run.sh` launches the release, not `erl -eval`.** e.g.
-`exec _build/simple/rel/simple/bin/simple foreground` (or the `-noshell`-correct
-boot you settle on), after `rebar3 as simple release`. The `-eval` path is gone.
+The clean fix is to **boot the VM directly instead of via the `foreground`
+wrapper**, so we control stdout and emit no diagnostics. The wrapper's own `Exec:`
+line *is the recipe*: run `bin/simple foreground` once, copy the `Exec:` invocation
+(it has the exact `-boot`/`-boot_var`/`-config`/`-args_file`), and replicate it in
+`run.sh` with **`-noshell`** (drop `-noinput +Bd`) and **no echoes**. Keep the
+existing `-noshell` `vm.args`. Do **not** use `console` (it starts a shell — banner
+on stdout, competes for stdin). **Document the exact invocation** (howto §4.4 seed).
+(Note: this is a stdout-hygiene fix, not a "nothing works" fix — don't destabilise
+the working launch; the goal is a clean channel, verified by the assertion below.)
+
+**7. `run.sh` boots the release directly (no `erl -eval`, no `foreground`/`console`).**
+After `rebar3 as simple release`, `exec erl -noshell -boot
+<rel>/releases/<vsn>/start -boot_var … -config <rel>/releases/<vsn>/sys -args_file
+<rel>/releases/<vsn>/vm.args` (derived from the `Exec:` line per #6). Still a proper
+release boot — app-controller-owned, permanent, EOF→node-halt — just without the
+chatty daemon wrapper.
 
 ## Verify
 
 - **Round-trip via the release:** launch `run.sh`, feed `initialize` +
-  `notifications/initialized` + `tools/list` on stdin → full catalog on stdout,
-  **no** `=INFO`/`=PROGRESS`/`=CRASH`/stray bytes on stdout. (Harden
-  `test/scripts/test_stdio_roundtrip.sh` to drive the release.)
+  `notifications/initialized` + `tools/list` on stdin → full catalog on stdout.
+  Harden `test/scripts/test_stdio_roundtrip.sh` to drive the release **and to
+  assert stdout purity**: the **first non-blank line on stdout MUST parse as JSON**
+  — no `Exec:`/`Root:`/path preamble, no `=INFO`/`=PROGRESS`/`=CRASH`. This single
+  assertion catches both the launcher-echo pollution and (via no-response) the
+  `-noinput`-can't-read failure; it's the regression guard for this whole class.
 - **Lifetime:** the server stays alive while stdin is open; **stdin EOF → the node
   exits cleanly** (sane exit, no `reader_died` spew).
-- **Not via the eval workaround:** `! grep -n "eval" examples/simple/run.sh`.
+- **Not via a disqualified launcher:** `! grep -nE "eval|foreground|console" examples/simple/run.sh`.
 - `make check` green; `make dialyzer` clean on OTP 27 and 28.
 
 ## Escalate, don't work around
