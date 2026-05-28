@@ -9,6 +9,7 @@
 %%   - Multiple transports (stdio + tcp)
 
 -export([start_stdio/0, start_stdio/1, register_all/1]).
+-export([tools/0, resources/0, resource_template/0, prompts/0]).
 
 -define(CITIES, [<<"london">>, <<"paris">>, <<"tokyo">>, <<"new_york">>]).
 
@@ -38,6 +39,9 @@ tools() ->
 
 resources() ->
     weather_resources().
+
+resource_template() ->
+    weather_resource_template().
 
 prompts() ->
     weather_prompts().

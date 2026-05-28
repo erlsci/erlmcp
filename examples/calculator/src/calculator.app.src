@@ -1,0 +1,9 @@
+{application, calculator, [
+    {description, "Calculator MCP server (stdio)"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {calculator_app, []}},
+    {applications, [kernel, stdlib, erlmcp]},
+    {start_phases, [{serve, []}]},
+    {env, []}
+]}.
