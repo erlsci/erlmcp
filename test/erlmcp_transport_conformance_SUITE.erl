@@ -37,11 +37,13 @@ end_per_testcase(_TC, _Config) ->
     ok.
 
 start_transport(stdio, Session) ->
-    {ok, Pid} = erlmcp_transport_stdio:start_link(test_conf, #{
-        session => Session, test_mode => true
+    {ok, Pid} = erlmcp_transport_stdio:start_link(#{
+        session => Session
     }),
+    ok = erlmcp_transport_stdio:set_session(Pid, Session),
+    SendFun = fun(P, Data) -> P ! {send, Data}, ok end,
     {Pid, fun erlmcp_transport_stdio:close/1,
-          fun erlmcp_transport_stdio:send/2,
+          SendFun,
           fun erlmcp_transport_stdio:simulate_input/2};
 start_transport(streamable_http, Session) ->
     {ok, Pid} = erlmcp_transport_streamable_http:start_link(#{

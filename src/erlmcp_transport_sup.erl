@@ -16,7 +16,7 @@ start_link() ->
 -spec start_child(atom(), atom(), map()) -> {ok, pid()} | {error, term()}.
 start_child(TransportId, Type, Config) ->
     {Module, Args} = case Type of
-        stdio -> {erlmcp_transport_stdio, [TransportId, Config]};
+        stdio -> {erlmcp_transport_stdio, [Config]};
         tcp -> {erlmcp_transport_tcp, [Config]};
         http -> {erlmcp_transport_http, [Config]}
     end,
