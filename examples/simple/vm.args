@@ -1,5 +1,0 @@
-## MCP stdio server VM args
-##
-## No -sname/-name: MCP stdio servers don't need Erlang distribution.
-## No -noshell here: passed directly to erlexec in run.sh.
-## No -noinput: the transport must read stdin via the `user` I/O server.
