@@ -1,15 +1,5 @@
 ## MCP stdio server VM args
 ##
-## -noshell: no Erlang shell — essential for stdio MCP servers:
-##   - prevents the shell from competing for stdin
-##   - prevents shell/REPL output from polluting stdout
-##   - the `user` I/O server is still bound to fd 0/1
-##
-## Do NOT use -noinput: the transport must read stdin.
-##
-## The `user` registered process is the I/O server bound to fd 0/1
-## under -noshell. The transport reads via io:get_line(user, "") and
-## writes via io:put_chars(user, Data).
-
--sname simple
--noshell
+## No -sname/-name: MCP stdio servers don't need Erlang distribution.
+## No -noshell here: passed directly to erlexec in run.sh.
+## No -noinput: the transport must read stdin via the `user` I/O server.

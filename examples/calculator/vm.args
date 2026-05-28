@@ -1,2 +1,2 @@
--sname calculator
--noshell
+## MCP stdio server VM args
+## No distribution needed for stdio MCP servers.
