@@ -272,7 +272,7 @@ log_message(Session, Level, Logger, Data) when is_pid(Session), is_atom(Level) -
 %% Convenience setup (M4)
 %%====================================================================
 
--spec start_stdio_setup(atom(), map()) -> {ok, pid()} | {error, term()}.
+-spec start_stdio_setup(atom(), map()) -> {ok, pid()} | {error, term()} | ignore.
 start_stdio_setup(ServerId, Config) when is_atom(ServerId) ->
     SubtreeConfig = Config#{name => atom_to_binary(ServerId, utf8)},
     case erlmcp_stdio_sup:start_link(SubtreeConfig) of

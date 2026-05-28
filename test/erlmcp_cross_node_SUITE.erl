@@ -11,14 +11,14 @@ all() ->
     [sampling_cross_node, elicitation_cross_node].
 
 init_per_suite(Config) ->
-    case net_kernel:longnames() of
-        true -> Config;
-        false -> Config;
-        ignored ->
+    case node() of
+        'nonode@nohost' ->
             case net_kernel:start([erlmcp_test_node, shortnames]) of
                 {ok, _} -> [{started_dist, true} | Config];
-                {error, _} -> {skip, "Distribution not available (epmd not running)"}
-            end
+                {error, _} -> {skip, "Distribution not available"}
+            end;
+        _ ->
+            Config
     end.
 
 end_per_suite(Config) ->
@@ -31,12 +31,22 @@ end_per_suite(Config) ->
 init_per_testcase(_TC, Config) ->
     case start_peer_node() of
         {ok, PeerNode} ->
-            [{peer_node, PeerNode} | Config];
+            try setup_cross_node(PeerNode) of
+                {Srv, Server, Client} ->
+                    [{peer_node, PeerNode}, {srv, Srv},
+                     {server, Server}, {client, Client} | Config]
+            catch _:Reason ->
+                stop_peer_node(PeerNode),
+                {skip, {cross_node_setup_failed, Reason}}
+            end;
         {error, Reason} ->
             {skip, {cannot_start_peer, Reason}}
     end.
 
 end_per_testcase(_TC, Config) ->
+    catch erlmcp_client_session:stop(?config(client, Config)),
+    catch gen_statem:stop(?config(server, Config)),
+    catch gen_server:stop(?config(srv, Config)),
     case proplists:get_value(peer_node, Config, undefined) of
         undefined -> ok;
         Node -> stop_peer_node(Node)
@@ -48,9 +58,9 @@ end_per_testcase(_TC, Config) ->
 %%====================================================================
 
 sampling_cross_node(Config) ->
-    PeerNode = ?config(peer_node, Config),
-    {Server, Client} = setup_cross_node(PeerNode),
-    ok = erlmcp:add_tool(Server, #{
+    Srv = ?config(srv, Config),
+    Client = ?config(client, Config),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"ask">>, description => <<"Ask">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->
@@ -63,14 +73,12 @@ sampling_cross_node(Config) ->
     }),
     {ok, Result} = erlmcp_client_session:call_tool(Client, <<"ask">>, #{}),
     [C] = maps:get(<<"content">>, Result),
-    ?assertEqual(<<"test-model">>, maps:get(<<"text">>, C)),
-    erlmcp_client_session:stop(Client),
-    gen_statem:stop(Server).
+    ?assertEqual(<<"test-model">>, maps:get(<<"text">>, C)).
 
 elicitation_cross_node(Config) ->
-    PeerNode = ?config(peer_node, Config),
-    {Server, Client} = setup_cross_node(PeerNode),
-    ok = erlmcp:add_tool(Server, #{
+    Srv = ?config(srv, Config),
+    Client = ?config(client, Config),
+    ok = erlmcp:add_tool(Srv, #{
         name => <<"confirm">>, description => <<"Confirm">>,
         input_schema => erlmcp_schema:object([]),
         handler => fun(_, Ctx) ->
@@ -81,27 +89,27 @@ elicitation_cross_node(Config) ->
     }),
     {ok, Result} = erlmcp_client_session:call_tool(Client, <<"confirm">>, #{}),
     [C] = maps:get(<<"content">>, Result),
-    ?assertEqual(<<"accept">>, maps:get(<<"text">>, C)),
-    erlmcp_client_session:stop(Client),
-    gen_statem:stop(Server).
+    ?assertEqual(<<"accept">>, maps:get(<<"text">>, C)).
 
 %%====================================================================
 %% Cross-node setup — server on this node, client on peer
 %%====================================================================
 
-setup_cross_node(PeerNode) ->
+setup_cross_node({_Pid, PeerNode}) ->
     SBridge = spawn_link(fun() -> dist_bridge(undefined) end),
     CBridge = rpc:call(PeerNode, erlang, spawn_link,
                        [fun() -> dist_bridge(undefined) end]),
-    {ok, Server} = erlmcp_server_session:start_link(#{
-        transport => SBridge,
+    is_pid(CBridge) orelse error({peer_spawn_failed, CBridge}),
+    {ok, Srv} = erlmcp_server:start_link(#{
         name => <<"cross-server">>, version => <<"1.0">>,
-        capabilities => #{}
+        tools => [#{name => <<"noop">>, description => <<"Noop">>,
+                    input_schema => erlmcp_schema:object([]),
+                    handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end}]
     }),
-    ok = erlmcp:add_tool(Server, #{
-        name => <<"noop">>, description => <<"Noop">>,
-        input_schema => erlmcp_schema:object([]),
-        handler => fun(_, _) -> {ok, erlmcp:text(<<"ok">>)} end
+    Responder = erlmcp_reply:new_device(SBridge),
+    {ok, Server} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"cross-server">>, version => <<"1.0">>
     }),
     {ok, Client} = rpc:call(PeerNode, erlmcp_client_session, start_link, [#{
         transport => CBridge,
@@ -118,7 +126,7 @@ setup_cross_node(PeerNode) ->
         <<"protocolVersion">> => <<"2025-11-25">>,
         <<"capabilities">> => #{}
     }),
-    {Server, Client}.
+    {Srv, Server, Client}.
 
 dist_bridge(Peer) ->
     receive

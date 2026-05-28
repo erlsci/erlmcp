@@ -10,7 +10,7 @@
 %% supervisor — no auto-restart. A stdio server is single-use; when
 %% stdin closes, the process exits.
 
--spec start_link(map()) -> {ok, pid()} | {error, term()}.
+-spec start_link(map()) -> {ok, pid()} | {error, term()} | ignore.
 start_link(Config) when is_map(Config) ->
     case supervisor:start_link(?MODULE, []) of
         {ok, Sup} ->
