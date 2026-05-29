@@ -85,6 +85,5 @@ start_child(Sup, Id, Mod, Fun, Args) ->
     },
     case supervisor:start_child(Sup, Spec) of
         {ok, Pid} -> {ok, Pid};
-        {ok, Pid, _} -> {ok, Pid};
         Error -> Error
     end.
