@@ -6,4 +6,4 @@ rebar3 as weather compile >/dev/null 2>&1
 exec erl -noshell \
     -pa $(rebar3 as weather path --ebin -s ' -pa ') \
     -config config/sys \
-    -eval 'application:ensure_all_started(weather)'
+    -eval 'application:ensure_all_started(weather, permanent)'

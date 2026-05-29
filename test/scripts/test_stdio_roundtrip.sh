@@ -14,6 +14,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
+# Portable timeout: prefer `timeout` (Linux/CI), fall back to `gtimeout` (macOS coreutils).
+if command -v timeout >/dev/null 2>&1; then
+    TIMEOUT=timeout
+elif command -v gtimeout >/dev/null 2>&1; then
+    TIMEOUT=gtimeout
+else
+    echo "SKIP: neither 'timeout' nor 'gtimeout' found"; exit 0
+fi
+
 INIT_REQ='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"roundtrip","version":"0"}}}'
 
 EXAMPLES=(simple calculator weather)
@@ -44,7 +53,7 @@ for example in "${EXAMPLES[@]}"; do
     {
         printf '%s\n' "$INIT_REQ"
         sleep 10
-    } | timeout 25 bash "$SCRIPT" >"$out" 2>"$err" || true
+    } | $TIMEOUT 25 bash "$SCRIPT" >"$out" 2>"$err" || true
 
     # P6M2-7/P6M2-10: the FIRST non-blank line on stdout MUST parse as JSON.
     # No Exec:/Root:/path preamble, no =INFO/=PROGRESS/=CRASH reports.
@@ -71,6 +80,39 @@ for example in "${EXAMPLES[@]}"; do
     fi
     rm -f "$out" "$err"
 done
+
+##====================================================================
+## P6M2-9: EOF → node halts (end-to-end subprocess test)
+##
+## Launch simple, send initialize + initialized, close stdin, then
+## wait for the process to exit within a timeout. A timeout means
+## the node lingered (the permanent app didn't halt the node).
+##====================================================================
+
+echo
+echo "Testing EOF → node halt (P6M2-9)..."
+
+INITIALIZED_NOTIF='{"jsonrpc":"2.0","method":"notifications/initialized"}'
+
+eof_out="$(mktemp)"
+eof_err="$(mktemp)"
+
+# Send init + initialized, then immediately close stdin (heredoc ends).
+# The node should halt within seconds because the app is permanent.
+printf '%s\n%s\n' "$INIT_REQ" "$INITIALIZED_NOTIF" \
+    | $TIMEOUT 10 bash examples/simple/run.sh >"$eof_out" 2>"$eof_err"
+eof_exit=$?
+
+if [ "$eof_exit" -ne 124 ]; then
+    echo "PASS: simple — node exited on stdin EOF (exit code: $eof_exit)"
+    pass=$((pass + 1))
+else
+    echo "FAIL: simple — node did NOT exit within 10s after stdin EOF"
+    echo "  --- stderr (first 10 lines) ---"
+    sed 's/^/    /' "$eof_err" | head -10
+    fail=$((fail + 1))
+fi
+rm -f "$eof_out" "$eof_err"
 
 echo
 echo "Results: $pass passed, $fail failed"

@@ -5,10 +5,11 @@
 -export([start_link/1, serve/1]).
 -export([init/1]).
 
-%% one_for_all + temporary + intensity 0: all three (server, transport,
-%% session) live and die as a unit. Any child death terminates the
-%% supervisor — no auto-restart. A stdio server is single-use; when
-%% stdin closes, the process exits.
+%% one_for_all + permanent + intensity 0: all three (server, transport,
+%% session) live and die as a unit. Any child death triggers the
+%% one_for_all cascade; the restart attempt exceeds intensity 0 and the
+%% supervisor terminates. A stdio server is single-use; when stdin
+%% closes, the subtree dies and the permanent app halts the node.
 
 -spec start_link(map()) -> {ok, pid()} | {error, term()} | ignore.
 start_link(Config) when is_map(Config) ->
@@ -79,7 +80,7 @@ start_child(Sup, Id, Mod, Fun, Args) ->
     Spec = #{
         id => Id,
         start => {Mod, Fun, Args},
-        restart => temporary,
+        restart => permanent,
         shutdown => 5000,
         type => worker
     },

@@ -6,4 +6,4 @@ rebar3 as simple compile >/dev/null 2>&1
 exec erl -noshell \
     -pa $(rebar3 as simple path --ebin -s ' -pa ') \
     -config config/sys \
-    -eval 'application:ensure_all_started(simple)'
+    -eval 'application:ensure_all_started(simple, permanent)'
