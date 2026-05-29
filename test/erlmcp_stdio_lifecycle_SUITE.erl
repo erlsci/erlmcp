@@ -7,22 +7,26 @@
 -include_lib("stdlib/include/assert.hrl").
 
 -export([all/0]).
--export([eof_reader_absorbed/1, dynamic_path_escape_hatch/1]).
+-export([eof_shuts_down_transport/1, dynamic_path_escape_hatch/1]).
 
-all() -> [eof_reader_absorbed, dynamic_path_escape_hatch].
+all() -> [eof_shuts_down_transport, dynamic_path_escape_hatch].
 
-%% P6M2-9: stdin EOF — reader exits normally, transport absorbs it
-%% (noreply on normal EXIT). The subtree stays alive for in-flight work.
-eof_reader_absorbed(_Config) ->
+%% P6M2-9: stdin EOF → reader exits normal → transport stops →
+%% subtree (one_for_all, intensity 0) terminates → permanent app dies
+%% → node halts. Test: transport process dies after reader EOF.
+eof_shuts_down_transport(_Config) ->
     ReadFun = fun() -> eof end,
     {ok, Pid} = erlmcp_transport_stdio:start_link(#{
         session => self(), read_fun => ReadFun
     }),
-    ok = erlmcp_transport_stdio:set_session(Pid, self()),
+    unlink(Pid),
+    Ref = monitor(process, Pid),
     ok = erlmcp_transport_stdio:serve(Pid),
-    timer:sleep(100),
-    ?assert(is_process_alive(Pid)),
-    erlmcp_transport_stdio:close(Pid).
+    receive
+        {'DOWN', Ref, process, Pid, normal} -> ok
+    after 2000 ->
+        ct:fail(transport_did_not_stop_on_eof)
+    end.
 
 %% P6M2-14: Dynamic path — start_server + start_transport(paused) +
 %% manual register + explicit serve/1.

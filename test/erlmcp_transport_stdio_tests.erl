@@ -56,11 +56,14 @@ serve_starts_reader_test() ->
     {ok, Pid} = erlmcp_transport_stdio:start_link(#{
         session => self(), read_fun => ReadFun
     }),
+    unlink(Pid),
+    Ref = monitor(process, Pid),
     ok = erlmcp_transport_stdio:set_session(Pid, self()),
     ok = erlmcp_transport_stdio:serve(Pid),
     receive {transport_data, <<"hello">>, _Responder} -> ok
     after 2000 -> ?assert(false) end,
-    erlmcp_transport_stdio:close(Pid).
+    receive {'DOWN', Ref, process, Pid, normal} -> ok
+    after 2000 -> ?assert(false) end.
 
 simulate_input_test() ->
     {ok, Srv} = erlmcp_server:start_link(#{
@@ -160,16 +163,16 @@ reader_delivers_lines_test() ->
     {ok, Pid} = erlmcp_transport_stdio:start_link(#{
         session => self(), read_fun => ReadFun
     }),
+    unlink(Pid),
+    Ref = monitor(process, Pid),
     ok = erlmcp_transport_stdio:set_session(Pid, self()),
     ok = erlmcp_transport_stdio:serve(Pid),
-    unlink(Pid),
     receive {transport_data, <<"hello world">>, _} -> ok
     after 2000 -> ?assert(false) end,
     receive {transport_data, <<"binary line">>, _} -> ok
     after 2000 -> ?assert(false) end,
-    timer:sleep(100),
-    ?assert(is_process_alive(Pid)),
-    erlmcp_transport_stdio:close(Pid).
+    receive {'DOWN', Ref, process, Pid, normal} -> ok
+    after 2000 -> ?assert(false) end.
 
 reader_skips_blank_lines_test() ->
     Counter = atomics:new(1, [{signed, false}]),
@@ -183,13 +186,14 @@ reader_skips_blank_lines_test() ->
     {ok, Pid} = erlmcp_transport_stdio:start_link(#{
         session => self(), read_fun => ReadFun
     }),
+    unlink(Pid),
+    Ref = monitor(process, Pid),
     ok = erlmcp_transport_stdio:set_session(Pid, self()),
     ok = erlmcp_transport_stdio:serve(Pid),
-    unlink(Pid),
     receive {transport_data, <<"real">>, _} -> ok
     after 2000 -> ?assert(false) end,
-    timer:sleep(100),
-    erlmcp_transport_stdio:close(Pid).
+    receive {'DOWN', Ref, process, Pid, normal} -> ok
+    after 2000 -> ?assert(false) end.
 
 reader_error_stops_transport_test() ->
     ReadFun = fun() -> {error, eio} end,
@@ -203,16 +207,17 @@ reader_error_stops_transport_test() ->
     after 2000 -> ?assert(false)
     end.
 
-reader_eof_graceful_test() ->
+reader_eof_stops_transport_test() ->
     ReadFun = fun() -> eof end,
     {ok, Pid} = erlmcp_transport_stdio:start_link(#{
         session => self(), read_fun => ReadFun
     }),
     ok = erlmcp_transport_stdio:serve(Pid),
     unlink(Pid),
-    timer:sleep(100),
-    ?assert(is_process_alive(Pid)),
-    erlmcp_transport_stdio:close(Pid).
+    Ref = monitor(process, Pid),
+    receive {'DOWN', Ref, process, Pid, normal} -> ok
+    after 2000 -> ?assert(false)
+    end.
 
 terminate_kills_reader_test() ->
     ReadFun = fun() -> receive after 60000 -> eof end end,
