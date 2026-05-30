@@ -210,8 +210,9 @@ directory_tool(Config) ->
     [Content] = maps:get(<<"content">>, Result),
     DirJson = maps:get(<<"text">>, Content),
     {ok, DirMap} = erlmcp_codec:decode(DirJson),
-    ?assert(maps:is_key(<<"arithmetic">>, DirMap)),
-    ArithTools = maps:get(<<"arithmetic">>, DirMap),
+    ToolsByCat = maps:get(<<"tools">>, DirMap),
+    ?assert(maps:is_key(<<"arithmetic">>, ToolsByCat)),
+    ArithTools = maps:get(<<"arithmetic">>, ToolsByCat),
     ArithNames = [maps:get(<<"name">>, T) || T <- ArithTools],
     ?assert(lists:member(<<"add">>, ArithNames)).
 

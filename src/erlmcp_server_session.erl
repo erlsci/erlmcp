@@ -324,8 +324,7 @@ handle_initialize(Id, Params, Data, Responder) ->
     case erlmcp_capabilities:negotiate_version(
              ClientVersion, erlmcp_capabilities:supported_versions()) of
         {ok, Version} ->
-            Tools = erlmcp_server:get_tools(Data#data.server_ref),
-            Instructions = erlmcp_instructions:generate(maps:values(Tools)),
+            Instructions = resolve_instructions(Data),
             ServerCaps = erlmcp_capabilities:build_server_capabilities(
                              derive_capabilities(Data)),
             Result = #{
@@ -357,7 +356,8 @@ handle_request(Id, Method, Params, Data, Responder) ->
     Ctx = erlmcp_ctx:new(#{
         session => Session,
         request_id => Id,
-        server_ref => Data#data.server_ref
+        server_ref => Data#data.server_ref,
+        server_pid => Data#data.server_pid
     }),
     {Pid, Ref} = spawn_monitor(fun() ->
         Result = dispatch_request(Method, Params, Handlers, Ctx),
@@ -874,6 +874,23 @@ generate_task_id() ->
 %% Capabilities & instructions
 %%====================================================================
 
+resolve_instructions(Data) ->
+    case Data#data.server_pid of
+        undefined ->
+            erlmcp_instructions:generate(
+                maps:values(erlmcp_server:get_tools(Data#data.server_ref)));
+        ServerPid ->
+            case erlmcp_server:get_custom_instructions(ServerPid) of
+                undefined ->
+                    Identity = erlmcp_server:get_identity(ServerPid),
+                    Tools = maps:values(
+                        erlmcp_server:get_tools(Data#data.server_ref)),
+                    erlmcp_instructions:generate(Identity, Tools);
+                Custom when is_binary(Custom) ->
+                    Custom
+            end
+    end.
+
 derive_capabilities(Data) ->
     Base = Data#data.capabilities,
     Tab = Data#data.server_ref,
@@ -1051,7 +1068,7 @@ format_tool_for_list(Spec) ->
     end.
 
 disc_meta(Spec) ->
-    lists:foldl(fun({ErlKey, JsonKey}, Acc) ->
+    Base = lists:foldl(fun({ErlKey, JsonKey}, Acc) ->
         case maps:get(ErlKey, Spec, undefined) of
             undefined -> Acc;
             Value -> Acc#{JsonKey => Value}
@@ -1061,7 +1078,12 @@ disc_meta(Spec) ->
         {when_to_use, <<"io.erlmcp/when_to_use">>},
         {next, <<"io.erlmcp/next">>},
         {entry_point, <<"io.erlmcp/entry_point">>}
-    ]).
+    ]),
+    case maps:get(protocol_features, Spec, undefined) of
+        undefined -> Base;
+        PF -> Base#{<<"io.erlmcp/protocol_features">> =>
+                     [atom_to_binary(F) || F <- PF]}
+    end.
 
 format_annotations(Ann) when is_map(Ann) ->
     maps:fold(fun(Key, Val, Acc) ->

@@ -182,7 +182,7 @@ resource_link(Uri, MimeType) when is_binary(Uri), is_binary(MimeType) ->
 make_directory_tool() ->
     #{
         name => <<"directory">>,
-        description => <<"Returns a categorized listing of all available tools">>,
+        description => <<"Start here — an oriented overview of this server, with workflow hints and which tools use advanced protocol features.">>,
         input_schema => erlmcp_schema:object([]),
         category => <<"meta">>,
         when_to_use => <<"When you need an overview of all available tools">>,
@@ -198,23 +198,48 @@ conformance_tools(Server) ->
 
 directory_handler(_Args, Ctx) ->
     Tab = erlmcp_ctx:server_ref(Ctx),
+    ServerPid = erlmcp_ctx:server_pid(Ctx),
     AllTools = case Tab of
         undefined -> [];
         _ -> maps:values(erlmcp_server:get_tools(Tab))
     end,
     Tools = [T || T <- AllTools, maps:get(is_directory, T, false) =/= true],
     Categorized = group_by_category(Tools),
-    Entries = maps:fold(fun(Cat, CatTools, Acc) ->
-        ToolEntries = [#{
-            <<"name">> => maps:get(name, T),
-            <<"description">> => maps:get(description, T, <<>>),
-            <<"when_to_use">> => maps:get(when_to_use, T, <<>>),
-            <<"next">> => maps:get(next, T, [])
-        } || T <- CatTools],
-        Acc#{Cat => ToolEntries}
+    ToolEntries = maps:fold(fun(Cat, CatTools, Acc) ->
+        CatEntries = [tool_directory_entry(T) || T <- CatTools],
+        Acc#{Cat => CatEntries}
     end, #{}, Categorized),
-    {ok, Payload} = erlmcp_codec:encode(Entries),
+    Identity = build_server_identity(ServerPid, Tab),
+    Result = #{<<"server">> => Identity, <<"tools">> => ToolEntries},
+    {ok, Payload} = erlmcp_codec:encode(Result),
     {ok, text(Payload)}.
+
+tool_directory_entry(T) ->
+    Base = #{
+        <<"name">> => maps:get(name, T),
+        <<"description">> => maps:get(description, T, <<>>),
+        <<"when_to_use">> => maps:get(when_to_use, T, <<>>),
+        <<"next">> => maps:get(next, T, [])
+    },
+    case maps:get(protocol_features, T, []) of
+        [] -> Base;
+        PF -> Base#{<<"protocol_features">> => [atom_to_binary(F) || F <- PF]}
+    end.
+
+build_server_identity(ServerPid, Tab) ->
+    Identity = case ServerPid of
+        undefined -> #{};
+        _ -> erlmcp_server:get_identity(ServerPid)
+    end,
+    Info = erlmcp_server:get_server_info(Tab),
+    Base = #{
+        <<"name">> => erlmcp_model:info_name(Info),
+        <<"version">> => erlmcp_model:info_version(Info)
+    },
+    maybe_add_field(<<"purpose">>, purpose, Identity,
+    maybe_add_field(<<"source">>, source, Identity,
+    maybe_add_field(<<"docs">>, docs, Identity,
+    Base))).
 
 group_by_category(Tools) ->
     Grouped = lists:foldl(fun(T, Acc) ->
@@ -223,6 +248,12 @@ group_by_category(Tools) ->
         Acc#{Cat => [T | Existing]}
     end, #{}, Tools),
     maps:map(fun(_, V) -> lists:reverse(V) end, Grouped).
+
+maybe_add_field(JsonKey, ConfigKey, Config, Acc) ->
+    case maps:get(ConfigKey, Config, undefined) of
+        undefined -> Acc;
+        V -> Acc#{JsonKey => V}
+    end.
 
 %%====================================================================
 %% Resources (M2b)

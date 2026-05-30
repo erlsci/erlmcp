@@ -56,7 +56,9 @@
     task_cancel_running/1,
     resource_read_list_handler/1,
     parse_error_returns_error_response/1,
-    cancel_nonexistent_request_no_crash/1
+    cancel_nonexistent_request_no_crash/1,
+    instructions_enriched/1,
+    instructions_override/1
 ]).
 
 all() ->
@@ -110,8 +112,25 @@ all() ->
      task_cancel_running,
      resource_read_list_handler,
      parse_error_returns_error_response,
-     cancel_nonexistent_request_no_crash].
+     cancel_nonexistent_request_no_crash,
+     instructions_enriched,
+     instructions_override].
 
+init_per_testcase(instructions_override, Config) ->
+    {ok, Server} = erlmcp_server:start_link(#{
+        name => <<"override-srv">>, version => <<"1.0">>,
+        instructions => <<"Custom server README for LLM consumers.">>,
+        tools => [
+            #{name => <<"t">>, description => <<"a tool">>,
+              handler => fun(_, _) -> {ok, []} end}
+        ]
+    }),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Server, responder => Responder,
+        name => <<"override-srv">>, version => <<"1.0">>
+    }),
+    [{server, Server}, {session, Session}, {responder, Responder} | Config];
 init_per_testcase(_TC, Config) ->
     {ok, Server} = erlmcp_server:start_link(#{
         name => <<"ct-server">>, version => <<"1.0">>,
@@ -161,6 +180,10 @@ init_per_testcase(_TC, Config) ->
     }),
     [{server, Server} | Config].
 
+end_per_testcase(instructions_override, Config) ->
+    catch gen_statem:stop(?config(session, Config)),
+    gen_server:stop(?config(server, Config)),
+    ok;
 end_per_testcase(_TC, Config) ->
     Server = ?config(server, Config),
     gen_server:stop(Server),
@@ -1102,3 +1125,32 @@ collector_loop(Parent, Tag, Acc) ->
     after 5000 ->
         ok
     end.
+
+instructions_enriched(Config) ->
+    Server = ?config(server, Config),
+    R = erlmcp_reply:new_device(self()),
+    {ok, S} = erlmcp_server_session:start_link(#{
+        server => Server, responder => R,
+        name => <<"ct-server">>, version => <<"1.0">>
+    }),
+    InitMsg = erlmcp_json_rpc:encode_request(1, <<"initialize">>,
+        #{<<"protocolVersion">> => <<"2025-11-25">>, <<"capabilities">> => #{}}),
+    ok = erlmcp_server_session:send_message(S, InitMsg),
+    Resp = receive_response(),
+    Result = maps:get(<<"result">>, Resp),
+    Instr = maps:get(<<"instructions">>, Result),
+    ?assert(is_binary(Instr)),
+    ?assert(binary:match(Instr, <<"ct-server">>) =/= nomatch),
+    ?assert(binary:match(Instr, <<"directory">>) =/= nomatch),
+    gen_statem:stop(S).
+
+instructions_override(Config) ->
+    S = ?config(session, Config),
+    InitMsg = erlmcp_json_rpc:encode_request(1, <<"initialize">>,
+        #{<<"protocolVersion">> => <<"2025-11-25">>, <<"capabilities">> => #{}}),
+    ok = erlmcp_server_session:send_message(S, InitMsg),
+    Resp = receive_response(),
+    Result = maps:get(<<"result">>, Resp),
+    Instr = maps:get(<<"instructions">>, Result),
+    ?assertEqual(<<"Custom server README for LLM consumers.">>, Instr),
+    gen_statem:stop(S).

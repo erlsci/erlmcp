@@ -22,6 +22,9 @@
          get_handlers/1,
          get_server_info/1, get_capabilities/1]).
 
+%% Server identity (gen_server call — not hot path)
+-export([get_identity/1, get_custom_instructions/1]).
+
 %% gen_server
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
@@ -30,7 +33,8 @@
 
 -record(state, {
     tab :: ets:tid(),
-    sessions = [] :: [pid()]
+    sessions = [] :: [pid()],
+    identity = #{} :: map()
 }).
 
 %%====================================================================
@@ -100,6 +104,14 @@ unregister_prompt(Server, Name) when is_binary(Name) ->
 -spec register_handler(server(), module()) -> ok.
 register_handler(Server, Module) when is_atom(Module) ->
     gen_server:call(Server, {register_handler, Module}).
+
+-spec get_identity(server()) -> map().
+get_identity(Server) ->
+    gen_server:call(Server, get_identity).
+
+-spec get_custom_instructions(server()) -> binary() | undefined.
+get_custom_instructions(Server) ->
+    gen_server:call(Server, get_custom_instructions).
 
 %%====================================================================
 %% ETS read helpers — called by sessions on the hot path
@@ -185,7 +197,10 @@ init(Config) ->
     ets:insert(Tab, {server_info, erlmcp_model:make_server_info(Name, Version)}),
     Caps = maps:get(capabilities, Config, #{}),
     ets:insert(Tab, {capabilities, Caps}),
-    State = #state{tab = Tab},
+    Identity = maps:with([name, version, purpose, source, docs], Config),
+    CustomInstr = maps:get(instructions, Config, undefined),
+    ets:insert(Tab, {custom_instructions, CustomInstr}),
+    State = #state{tab = Tab, identity = Identity},
     State1 = init_tools(Config, State),
     State2 = init_resources(Config, State1),
     State3 = init_prompts(Config, State2),
@@ -245,6 +260,11 @@ handle_call({register_handler, Module}, _From, State) ->
     end, ToolSpecs),
     notify_sessions(State, <<"notifications/tools/list_changed">>),
     {reply, ok, State};
+handle_call(get_identity, _From, State) ->
+    {reply, State#state.identity, State};
+handle_call(get_custom_instructions, _From, #state{tab = Tab} = State) ->
+    [{custom_instructions, V}] = ets:lookup(Tab, custom_instructions),
+    {reply, V, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -277,9 +297,12 @@ validate_tool_handler(Spec) ->
     case {Handler, HandlerMod} of
         {undefined, undefined} ->
             {error, {invalid_tool_spec, missing_handler}};
-        {F, _} when is_function(F, 2) -> ok;
-        {{M, F}, _} when is_atom(M), is_atom(F) -> ok;
-        {undefined, M} when is_atom(M) -> ok;
+        {F, _} when is_function(F, 2) ->
+            validate_protocol_features(Spec, invalid_tool_spec);
+        {{M, F}, _} when is_atom(M), is_atom(F) ->
+            validate_protocol_features(Spec, invalid_tool_spec);
+        {undefined, M} when is_atom(M) ->
+            validate_protocol_features(Spec, invalid_tool_spec);
         _ ->
             {error, {invalid_tool_spec, invalid_handler}}
     end.
@@ -321,10 +344,22 @@ check_required_keys(Spec, [{Key, binary} | Rest]) ->
 
 check_has_handler(Spec, ErrorTag) ->
     case maps:get(handler, Spec, undefined) of
-        F when is_function(F) -> ok;
-        {M, F} when is_atom(M), is_atom(F) -> ok;
+        F when is_function(F) -> validate_protocol_features(Spec, ErrorTag);
+        {M, F} when is_atom(M), is_atom(F) -> validate_protocol_features(Spec, ErrorTag);
         undefined -> {error, {ErrorTag, missing_handler}};
         _ -> {error, {ErrorTag, invalid_handler}}
+    end.
+
+validate_protocol_features(Spec, ErrorTag) ->
+    case maps:get(protocol_features, Spec, undefined) of
+        undefined -> ok;
+        PF when is_list(PF) ->
+            case lists:all(fun is_atom/1, PF) of
+                true -> ok;
+                false -> {error, {ErrorTag, {invalid_protocol_features, PF}}}
+            end;
+        Other ->
+            {error, {ErrorTag, {invalid_protocol_features, Other}}}
     end.
 
 %%====================================================================
