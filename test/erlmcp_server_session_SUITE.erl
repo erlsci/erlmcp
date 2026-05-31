@@ -58,7 +58,8 @@
     parse_error_returns_error_response/1,
     cancel_nonexistent_request_no_crash/1,
     instructions_enriched/1,
-    instructions_override/1
+    instructions_override/1,
+    protocol_features_surfaced/1
 ]).
 
 all() ->
@@ -114,8 +115,25 @@ all() ->
      parse_error_returns_error_response,
      cancel_nonexistent_request_no_crash,
      instructions_enriched,
-     instructions_override].
+     instructions_override,
+     protocol_features_surfaced].
 
+init_per_testcase(protocol_features_surfaced, Config) ->
+    {ok, Server} = erlmcp_server:start_link(#{
+        name => <<"pf-srv">>, version => <<"1.0">>,
+        tools => [
+            #{name => <<"ask">>, description => <<"sampling tool">>,
+              protocol_features => [sampling],
+              handler => fun(_, _) -> {ok, []} end},
+            erlmcp:make_directory_tool()
+        ]
+    }),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Server, responder => Responder,
+        name => <<"pf-srv">>, version => <<"1.0">>
+    }),
+    [{server, Server}, {session, Session}, {responder, Responder} | Config];
 init_per_testcase(instructions_override, Config) ->
     {ok, Server} = erlmcp_server:start_link(#{
         name => <<"override-srv">>, version => <<"1.0">>,
@@ -180,7 +198,8 @@ init_per_testcase(_TC, Config) ->
     }),
     [{server, Server} | Config].
 
-end_per_testcase(instructions_override, Config) ->
+end_per_testcase(TC, Config) when TC =:= instructions_override;
+                                  TC =:= protocol_features_surfaced ->
     catch gen_statem:stop(?config(session, Config)),
     gen_server:stop(?config(server, Config)),
     ok;
@@ -1153,4 +1172,29 @@ instructions_override(Config) ->
     Result = maps:get(<<"result">>, Resp),
     Instr = maps:get(<<"instructions">>, Result),
     ?assertEqual(<<"Custom server README for LLM consumers.">>, Instr),
+    gen_statem:stop(S).
+
+protocol_features_surfaced(Config) ->
+    S = ?config(session, Config),
+    InitMsg = erlmcp_json_rpc:encode_request(1, <<"initialize">>,
+        #{<<"protocolVersion">> => <<"2025-11-25">>, <<"capabilities">> => #{}}),
+    ok = erlmcp_server_session:send_message(S, InitMsg),
+    InitResp = receive_response(),
+    Instr = maps:get(<<"instructions">>,
+                     maps:get(<<"result">>, InitResp)),
+    ?assert(binary:match(Instr, <<"sampling">>) =/= nomatch),
+    InitedNotif = erlmcp_json_rpc:encode_notification(
+        <<"notifications/initialized">>, #{}),
+    ok = erlmcp_server_session:send_message(S, InitedNotif),
+    timer:sleep(50),
+    ListReq = erlmcp_json_rpc:encode_request(2, <<"tools/list">>, #{}),
+    ok = erlmcp_server_session:send_message(S, ListReq),
+    ListResp = receive_response(),
+    Tools = maps:get(<<"tools">>,
+                     maps:get(<<"result">>, ListResp)),
+    AskTool = hd([T || T <- Tools,
+                       maps:get(<<"name">>, T) =:= <<"ask">>]),
+    Meta = maps:get(<<"_meta">>, AskTool),
+    PF = maps:get(<<"io.erlmcp/protocol_features">>, Meta),
+    ?assertEqual([<<"sampling">>], PF),
     gen_statem:stop(S).
