@@ -14,7 +14,10 @@
     enum/1,
     any_of/1,
     ref/1,
-    validate/2
+    validate/2,
+    load_protocol_schema/0,
+    protocol_definition/1,
+    validate_protocol/2
 ]).
 
 -type schema() :: map().
@@ -120,8 +123,67 @@ validate(Schema, Data) ->
     end.
 
 %%====================================================================
+%% Protocol schema (MCP 2025-11-25)
+%%====================================================================
+
+-spec load_protocol_schema() -> {ok, map()} | {error, term()}.
+load_protocol_schema() ->
+    case schema_path() of
+        {ok, Path} ->
+            case file:read_file(Path) of
+                {ok, Bin} ->
+                    case erlmcp_codec:decode(Bin) of
+                        {ok, Schema} when is_map(Schema) ->
+                            {ok, maps:get(<<"definitions">>, Schema, #{})};
+                        {ok, _} ->
+                            {error, {bad_schema, not_object}};
+                        {error, _} = Err ->
+                            Err
+                    end;
+                {error, _} = Err ->
+                    Err
+            end;
+        {error, _} = Err ->
+            Err
+    end.
+
+-spec protocol_definition(binary()) -> {ok, map()} | {error, term()}.
+protocol_definition(Name) when is_binary(Name) ->
+    case load_protocol_schema() of
+        {ok, Defs} ->
+            case maps:find(Name, Defs) of
+                {ok, Def} -> {ok, Def};
+                error -> {error, {definition_not_found, Name}}
+            end;
+        {error, _} = Err ->
+            Err
+    end.
+
+-spec validate_protocol(binary(), term()) -> ok | {error, term()}.
+validate_protocol(DefinitionName, Data) when is_binary(DefinitionName) ->
+    case protocol_definition(DefinitionName) of
+        {ok, Schema} -> validate(Schema, Data);
+        {error, _} = Err -> Err
+    end.
+
+%%====================================================================
 %% Internal
 %%====================================================================
+
+schema_path() ->
+    Candidates = case code:priv_dir(erlmcp) of
+        {error, _} -> [];
+        PrivDir -> [filename:join([PrivDir, "schema", "mcp-2025-11-25.json"])]
+    end,
+    find_existing(Candidates).
+
+find_existing([]) ->
+    {error, schema_file_not_found};
+find_existing([Path | Rest]) ->
+    case filelib:is_regular(Path) of
+        true -> {ok, Path};
+        false -> find_existing(Rest)
+    end.
 
 apply_field_opts(Schema, Opts) ->
     lists:foldl(fun apply_one_opt/2, Schema, Opts).

@@ -95,3 +95,46 @@ jesse_integration_test() ->
     ?assertEqual(ok, erlmcp_schema:validate(Schema, #{<<"x">> => 1.5, <<"y">> => 2.5})),
     ?assertMatch({error, _}, erlmcp_schema:validate(Schema, #{<<"x">> => 1.5})),
     ?assertMatch({error, _}, erlmcp_schema:validate(Schema, #{<<"x">> => <<"not a number">>, <<"y">> => 1})).
+
+%%====================================================================
+%% Protocol schema tests (P6M5)
+%%====================================================================
+
+load_protocol_schema_test() ->
+    {ok, Defs} = erlmcp_schema:load_protocol_schema(),
+    ?assert(is_map(Defs)),
+    ?assert(maps:size(Defs) >= 20).
+
+protocol_definition_found_test() ->
+    {ok, Schema} = erlmcp_schema:protocol_definition(<<"Icon">>),
+    ?assertMatch(#{<<"type">> := <<"object">>}, Schema).
+
+protocol_definition_not_found_test() ->
+    ?assertMatch({error, {definition_not_found, _}},
+                 erlmcp_schema:protocol_definition(<<"NonExistent">>)).
+
+validate_protocol_icon_valid_test() ->
+    ok = erlmcp_schema:validate_protocol(<<"Icon">>,
+             #{<<"src">> => <<"data:image/png;base64,abc">>}).
+
+validate_protocol_icon_invalid_test() ->
+    {error, _} = erlmcp_schema:validate_protocol(<<"Icon">>,
+                     #{<<"type">> => <<"emoji">>, <<"emoji">> => <<"star">>}).
+
+validate_protocol_tool_test() ->
+    ok = erlmcp_schema:validate_protocol(<<"Tool">>,
+             #{<<"name">> => <<"test">>,
+               <<"inputSchema">> => #{<<"type">> => <<"object">>}}).
+
+validate_protocol_task_support_test() ->
+    ok = erlmcp_schema:validate_protocol(<<"ToolExecution">>,
+             #{<<"taskSupport">> => <<"optional">>}),
+    {error, _} = erlmcp_schema:validate_protocol(<<"ToolExecution">>,
+                     #{<<"taskSupport">> => <<"allowed">>}).
+
+validate_protocol_init_result_test() ->
+    ok = erlmcp_schema:validate_protocol(<<"InitializeResult">>,
+             #{<<"protocolVersion">> => <<"2025-11-25">>,
+               <<"capabilities">> => #{},
+               <<"serverInfo">> => #{<<"name">> => <<"x">>,
+                                     <<"version">> => <<"1">>}}).

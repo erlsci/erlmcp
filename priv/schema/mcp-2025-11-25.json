@@ -1,0 +1,506 @@
+{
+  "$schema": "http://json-schema.org/draft-06/schema#",
+  "title": "MCP Protocol Schema (2025-11-25)",
+  "description": "Hand-curated draft-06 JSON Schema for MCP protocol validation. Derived from docs/0.6.0/planning/schema.ts. Draft-06 required: jesse 1.8.x does not support draft-07. All $ref inlined for jesse validate_with_schema compatibility. SHOULD->MUST overlay applied inline: Icon.src required + additionalProperties:false (handoff §1.3); taskSupport enum constrained (handoff §1.5).",
+
+  "definitions": {
+    "Error": {
+      "type": "object",
+      "properties": {
+        "code": {"type": "integer"},
+        "message": {"type": "string"},
+        "data": {}
+      },
+      "required": ["code", "message"]
+    },
+
+    "JSONRPCRequest": {
+      "type": "object",
+      "properties": {
+        "jsonrpc": {"type": "string", "enum": ["2.0"]},
+        "id": {"oneOf": [{"type": "string"}, {"type": "number"}]},
+        "method": {"type": "string"},
+        "params": {"type": "object"}
+      },
+      "required": ["jsonrpc", "id", "method"]
+    },
+
+    "JSONRPCNotification": {
+      "type": "object",
+      "properties": {
+        "jsonrpc": {"type": "string", "enum": ["2.0"]},
+        "method": {"type": "string"},
+        "params": {"type": "object"}
+      },
+      "required": ["jsonrpc", "method"]
+    },
+
+    "JSONRPCResultResponse": {
+      "type": "object",
+      "properties": {
+        "jsonrpc": {"type": "string", "enum": ["2.0"]},
+        "id": {"oneOf": [{"type": "string"}, {"type": "number"}]},
+        "result": {"type": "object"}
+      },
+      "required": ["jsonrpc", "id", "result"]
+    },
+
+    "JSONRPCErrorResponse": {
+      "type": "object",
+      "properties": {
+        "jsonrpc": {"type": "string", "enum": ["2.0"]},
+        "id": {"oneOf": [{"type": "string"}, {"type": "number"}, {"type": "null"}]},
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {"type": "integer"},
+            "message": {"type": "string"},
+            "data": {}
+          },
+          "required": ["code", "message"]
+        }
+      },
+      "required": ["jsonrpc", "error"]
+    },
+
+    "Icon": {
+      "type": "object",
+      "description": "SHOULD->MUST overlay: src required, additionalProperties:false. Guards against handoff §1.3 (buggy emoji-icon shape with extra fields caused Claude Desktop to silently reject tools).",
+      "properties": {
+        "src": {"type": "string"},
+        "mimeType": {"type": "string"},
+        "sizes": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "theme": {"type": "string", "enum": ["light", "dark"]}
+      },
+      "required": ["src"],
+      "additionalProperties": false
+    },
+
+    "ToolExecution": {
+      "type": "object",
+      "description": "SHOULD->MUST overlay: taskSupport constrained to forbidden|optional|required. Guards against handoff §1.5 (taskSupport => allowed was accepted without error).",
+      "properties": {
+        "taskSupport": {
+          "type": "string",
+          "enum": ["forbidden", "optional", "required"]
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "Tool": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "$schema": {"type": "string"},
+            "type": {"type": "string", "enum": ["object"]},
+            "properties": {"type": "object"},
+            "required": {
+              "type": "array",
+              "items": {"type": "string"}
+            }
+          },
+          "required": ["type"]
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "$schema": {"type": "string"},
+            "type": {"type": "string", "enum": ["object"]},
+            "properties": {"type": "object"},
+            "required": {
+              "type": "array",
+              "items": {"type": "string"}
+            }
+          }
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "taskSupport": {
+              "type": "string",
+              "enum": ["forbidden", "optional", "required"]
+            }
+          },
+          "additionalProperties": false
+        },
+        "icons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "src": {"type": "string"},
+              "mimeType": {"type": "string"},
+              "sizes": {
+                "type": "array",
+                "items": {"type": "string"}
+              },
+              "theme": {"type": "string", "enum": ["light", "dark"]}
+            },
+            "required": ["src"],
+            "additionalProperties": false
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "properties": {
+            "title": {"type": "string"},
+            "readOnlyHint": {"type": "boolean"},
+            "destructiveHint": {"type": "boolean"},
+            "idempotentHint": {"type": "boolean"},
+            "openWorldHint": {"type": "boolean"}
+          }
+        },
+        "_meta": {"type": "object"}
+      },
+      "required": ["name", "inputSchema"]
+    },
+
+    "Resource": {
+      "type": "object",
+      "properties": {
+        "uri": {"type": "string"},
+        "name": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "mimeType": {"type": "string"},
+        "size": {"type": "integer"},
+        "icons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "src": {"type": "string"},
+              "mimeType": {"type": "string"},
+              "sizes": {"type": "array", "items": {"type": "string"}},
+              "theme": {"type": "string", "enum": ["light", "dark"]}
+            },
+            "required": ["src"],
+            "additionalProperties": false
+          }
+        },
+        "annotations": {"type": "object"},
+        "_meta": {"type": "object"}
+      },
+      "required": ["uri", "name"]
+    },
+
+    "ResourceTemplate": {
+      "type": "object",
+      "properties": {
+        "uriTemplate": {"type": "string"},
+        "name": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "mimeType": {"type": "string"},
+        "icons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "src": {"type": "string"},
+              "mimeType": {"type": "string"},
+              "sizes": {"type": "array", "items": {"type": "string"}},
+              "theme": {"type": "string", "enum": ["light", "dark"]}
+            },
+            "required": ["src"],
+            "additionalProperties": false
+          }
+        },
+        "annotations": {"type": "object"},
+        "_meta": {"type": "object"}
+      },
+      "required": ["uriTemplate", "name"]
+    },
+
+    "Prompt": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "description": {"type": "string"},
+              "required": {"type": "boolean"}
+            },
+            "required": ["name"]
+          }
+        },
+        "icons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "src": {"type": "string"},
+              "mimeType": {"type": "string"},
+              "sizes": {"type": "array", "items": {"type": "string"}},
+              "theme": {"type": "string", "enum": ["light", "dark"]}
+            },
+            "required": ["src"],
+            "additionalProperties": false
+          }
+        },
+        "_meta": {"type": "object"}
+      },
+      "required": ["name"]
+    },
+
+    "TextContent": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "enum": ["text"]},
+        "text": {"type": "string"},
+        "annotations": {"type": "object"}
+      },
+      "required": ["type", "text"]
+    },
+
+    "ImageContent": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "enum": ["image"]},
+        "data": {"type": "string"},
+        "mimeType": {"type": "string"},
+        "annotations": {"type": "object"}
+      },
+      "required": ["type", "data", "mimeType"]
+    },
+
+    "AudioContent": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "enum": ["audio"]},
+        "data": {"type": "string"},
+        "mimeType": {"type": "string"},
+        "annotations": {"type": "object"}
+      },
+      "required": ["type", "data", "mimeType"]
+    },
+
+    "ServerCapabilities": {
+      "type": "object",
+      "properties": {
+        "experimental": {"type": "object"},
+        "logging": {"type": "object"},
+        "completions": {"type": "object"},
+        "prompts": {"type": "object"},
+        "resources": {"type": "object"},
+        "tools": {"type": "object"}
+      }
+    },
+
+    "Implementation": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"type": "string"},
+        "title": {"type": "string"}
+      },
+      "required": ["name", "version"]
+    },
+
+    "InitializeResult": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {"type": "string"},
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "experimental": {"type": "object"},
+            "logging": {"type": "object"},
+            "completions": {"type": "object"},
+            "prompts": {"type": "object"},
+            "resources": {"type": "object"},
+            "tools": {"type": "object"}
+          }
+        },
+        "serverInfo": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "version": {"type": "string"},
+            "title": {"type": "string"}
+          },
+          "required": ["name", "version"]
+        },
+        "instructions": {"type": "string"},
+        "_meta": {"type": "object"}
+      },
+      "required": ["protocolVersion", "capabilities", "serverInfo"]
+    },
+
+    "ListToolsResult": {
+      "type": "object",
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "title": {"type": "string"},
+              "description": {"type": "string"},
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "$schema": {"type": "string"},
+                  "type": {"type": "string", "enum": ["object"]},
+                  "properties": {"type": "object"},
+                  "required": {"type": "array", "items": {"type": "string"}}
+                },
+                "required": ["type"]
+              },
+              "outputSchema": {"type": "object"},
+              "execution": {
+                "type": "object",
+                "properties": {
+                  "taskSupport": {
+                    "type": "string",
+                    "enum": ["forbidden", "optional", "required"]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "icons": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "src": {"type": "string"},
+                    "mimeType": {"type": "string"},
+                    "sizes": {"type": "array", "items": {"type": "string"}},
+                    "theme": {"type": "string", "enum": ["light", "dark"]}
+                  },
+                  "required": ["src"],
+                  "additionalProperties": false
+                }
+              },
+              "annotations": {"type": "object"},
+              "_meta": {"type": "object"}
+            },
+            "required": ["name", "inputSchema"]
+          }
+        },
+        "nextCursor": {"type": "string"},
+        "_meta": {"type": "object"}
+      },
+      "required": ["tools"]
+    },
+
+    "CallToolResult": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {"type": "string"},
+              "text": {"type": "string"},
+              "data": {"type": "string"},
+              "mimeType": {"type": "string"},
+              "annotations": {"type": "object"}
+            },
+            "required": ["type"]
+          }
+        },
+        "structuredContent": {"type": "object"},
+        "isError": {"type": "boolean"},
+        "_meta": {"type": "object"}
+      },
+      "required": ["content"]
+    },
+
+    "ListResourcesResult": {
+      "type": "object",
+      "properties": {
+        "resources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "uri": {"type": "string"},
+              "name": {"type": "string"},
+              "title": {"type": "string"},
+              "description": {"type": "string"},
+              "mimeType": {"type": "string"}
+            },
+            "required": ["uri", "name"]
+          }
+        },
+        "nextCursor": {"type": "string"},
+        "_meta": {"type": "object"}
+      },
+      "required": ["resources"]
+    },
+
+    "ListResourceTemplatesResult": {
+      "type": "object",
+      "properties": {
+        "resourceTemplates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "uriTemplate": {"type": "string"},
+              "name": {"type": "string"},
+              "title": {"type": "string"},
+              "description": {"type": "string"},
+              "mimeType": {"type": "string"}
+            },
+            "required": ["uriTemplate", "name"]
+          }
+        },
+        "nextCursor": {"type": "string"},
+        "_meta": {"type": "object"}
+      },
+      "required": ["resourceTemplates"]
+    },
+
+    "ListPromptsResult": {
+      "type": "object",
+      "properties": {
+        "prompts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "title": {"type": "string"},
+              "description": {"type": "string"},
+              "arguments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "required": {"type": "boolean"}
+                  },
+                  "required": ["name"]
+                }
+              }
+            },
+            "required": ["name"]
+          }
+        },
+        "nextCursor": {"type": "string"},
+        "_meta": {"type": "object"}
+      },
+      "required": ["prompts"]
+    }
+  }
+}

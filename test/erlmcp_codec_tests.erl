@@ -38,8 +38,6 @@ empty_map_roundtrip_test() ->
 encode_unencodable_test() ->
     ?assertMatch({error, {encode_error, badarg}}, erlmcp_codec:encode(make_ref())).
 
-%% P6M1-9: UTF-8 well-formedness guard
-
 ensure_utf8_valid_test() ->
     ?assertEqual(ok, erlmcp_codec:ensure_utf8(<<"hello">>)),
     ?assertEqual(ok, erlmcp_codec:ensure_utf8(<<>>)),
@@ -56,3 +54,44 @@ ensure_utf8_not_binary_test() ->
 encode_rejects_ill_formed_utf8_test() ->
     BadMap = #{<<"key">> => <<"value">>},
     {ok, _} = erlmcp_codec:encode(BadMap).
+
+%%====================================================================
+%% validate_outbound tests (P6M5-5)
+%%====================================================================
+
+validate_outbound_valid_response_test() ->
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
+            <<"result">> => #{<<"tools">> =>
+                [#{<<"name">> => <<"t">>,
+                   <<"inputSchema">> => #{<<"type">> => <<"object">>}}]}},
+    ?assertEqual(ok, erlmcp_codec:validate_outbound(Msg)).
+
+validate_outbound_bad_tools_list_test() ->
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
+            <<"result">> => #{<<"tools">> =>
+                [#{<<"name">> => <<"t">>,
+                   <<"inputSchema">> => #{<<"type">> => <<"object">>},
+                   <<"icons">> => [#{<<"emoji">> => <<"star">>}]}]}},
+    ?assertMatch({error, _}, erlmcp_codec:validate_outbound(Msg)).
+
+validate_outbound_error_response_test() ->
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
+            <<"error">> => #{<<"code">> => -32600, <<"message">> => <<"bad">>}},
+    ?assertEqual(ok, erlmcp_codec:validate_outbound(Msg)).
+
+validate_outbound_notification_test() ->
+    Msg = #{<<"jsonrpc">> => <<"2.0">>,
+            <<"method">> => <<"notifications/progress">>,
+            <<"params">> => #{}},
+    ?assertEqual(ok, erlmcp_codec:validate_outbound(Msg)).
+
+validate_outbound_non_tools_result_test() ->
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
+            <<"result">> => #{}},
+    ?assertEqual(ok, erlmcp_codec:validate_outbound(Msg)).
+
+validate_outbound_non_map_test() ->
+    ?assertEqual(ok, erlmcp_codec:validate_outbound(<<"not a map">>)).
+
+validate_outbound_unknown_shape_test() ->
+    ?assertEqual(ok, erlmcp_codec:validate_outbound(#{<<"foo">> => <<"bar">>})).
