@@ -7,6 +7,8 @@
          init_per_testcase/2, end_per_testcase/2]).
 
 -export([progress_over_sse/1,
+         sampling_round_trip/1,
+         fanout_post_without_sse_stream/1,
          session_survives_dropped_sse/1,
          idle_gc_terminates_session/1,
          get_sse_unknown_session/1,
@@ -15,6 +17,8 @@
 
 all() ->
     [progress_over_sse,
+     sampling_round_trip,
+     fanout_post_without_sse_stream,
      session_survives_dropped_sse,
      idle_gc_terminates_session,
      get_sse_unknown_session,
@@ -48,8 +52,31 @@ init_per_testcase(_TestCase, Config) ->
             {ok, [#{<<"type">> => <<"text">>, <<"text">> => <<"done">>}]}
         end
     },
+    SamplingTool = #{
+        name => <<"ask_peer">>,
+        description => <<"Sends a sampling/createMessage to the client">>,
+        handler => fun(_Args, Ctx) ->
+            Params = #{
+                <<"messages">> => [
+                    #{<<"role">> => <<"user">>,
+                      <<"content">> => #{<<"type">> => <<"text">>,
+                                         <<"text">> => <<"What is 2+2?">>}}
+                ],
+                <<"maxTokens">> => 100
+            },
+            case erlmcp_ctx:request_peer(Ctx, <<"sampling/createMessage">>, Params) of
+                {ok, Result} ->
+                    Content = maps:get(<<"content">>, Result, #{}),
+                    Text = maps:get(<<"text">>, Content, <<"(no response)">>),
+                    {ok, [#{<<"type">> => <<"text">>, <<"text">> => Text}]};
+                {error, Reason} ->
+                    Msg = iolist_to_binary(io_lib:format("~p", [Reason])),
+                    {error, -32603, <<"Sampling failed: ", Msg/binary>>}
+            end
+        end
+    },
     EchoTool = make_echo_tool(),
-    start_server(Config, #{tools => [SlowTool, EchoTool]}).
+    start_server(Config, #{tools => [SlowTool, SamplingTool, EchoTool]}).
 
 end_per_testcase(_TestCase, Config) ->
     Sup = proplists:get_value(sup, Config),
@@ -79,7 +106,6 @@ progress_over_sse(Config) ->
     Port = proplists:get_value(port, Config),
     SessionId = initialize_session(Port),
 
-    %% Open a GET SSE stream for push-channel traffic
     {ok, SseConn} = gun:open("127.0.0.1", Port),
     {ok, _} = gun:await_up(SseConn),
     SseRef = gun:get(SseConn, "/mcp", [
@@ -88,7 +114,6 @@ progress_over_sse(Config) ->
     ]),
     {response, nofin, 200, _SseHeaders} = gun:await(SseConn, SseRef, 5000),
 
-    %% POST a slow_compute call with a progress token
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
         <<"name">> => <<"slow_compute">>,
         <<"arguments">> => #{<<"steps">> => 3},
@@ -99,17 +124,15 @@ progress_over_sse(Config) ->
     [Content] = maps:get(<<"content">>, CallResult),
     ?assertEqual(<<"done">>, maps:get(<<"text">>, Content)),
 
-    %% Collect SSE events — progress notifications should have arrived
     ProgressEvents = collect_sse_events(SseConn, SseRef, 2000),
     ?assert(length(ProgressEvents) >= 1),
-
     gun:close(SseConn).
 
-session_survives_dropped_sse(Config) ->
+sampling_round_trip(Config) ->
     Port = proplists:get_value(port, Config),
     SessionId = initialize_session(Port),
 
-    %% Open SSE stream
+    %% 1. Open a GET SSE stream for server→client push traffic
     {ok, SseConn} = gun:open("127.0.0.1", Port),
     {ok, _} = gun:await_up(SseConn),
     SseRef = gun:get(SseConn, "/mcp", [
@@ -118,11 +141,100 @@ session_survives_dropped_sse(Config) ->
     ]),
     {response, nofin, 200, _} = gun:await(SseConn, SseRef, 5000),
 
-    %% Drop the SSE stream
+    %% 2. POST tools/call for the sampling tool (async — it will block
+    %%    waiting for the peer response)
+    Parent = self(),
+    CallerId = spawn_link(fun() ->
+        CallReq = erlmcp_json_rpc:encode_request(10, <<"tools/call">>, #{
+            <<"name">> => <<"ask_peer">>,
+            <<"arguments">> => #{}
+        }),
+        Result = post_json(Port, SessionId, CallReq),
+        Parent ! {tool_result, Result}
+    end),
+
+    %% 3. On the GET SSE stream, receive the sampling/createMessage request
+    SamplingReq = receive_sse_json(SseConn, SseRef, 5000),
+    ?assertEqual(<<"sampling/createMessage">>, maps:get(<<"method">>, SamplingReq)),
+    PeerReqId = maps:get(<<"id">>, SamplingReq),
+    ?assert(is_integer(PeerReqId)),
+
+    %% 4. POST back the sampling response correlated by id
+    PeerResp = erlmcp_json_rpc:encode_response(PeerReqId, #{
+        <<"role">> => <<"assistant">>,
+        <<"model">> => <<"test-model">>,
+        <<"content">> => #{<<"type">> => <<"text">>,
+                           <<"text">> => <<"The answer is 4">>}
+    }),
+    {202, _, _} = post_json(Port, SessionId, PeerResp),
+
+    %% Wait — the response is a JSON-RPC response (has "id" but also "result"),
+    %% not a notification. The is_notification check will see the "id" field and
+    %% treat it as a request, entering the cowboy_loop. But it's actually a
+    %% response to the session's outbound request. The session handles it via
+    %% handle_operational_message({response, Id, Result}, ...).
+    %% We need to send it as a message with an id field — but the session's
+    %% decode_and_classify_any will classify it as a response.
+
+    %% 5. Assert the originating tools/call response arrives
+    receive
+        {tool_result, {200, _, Body}} ->
+            ToolResult = decode_result(Body),
+            [Content] = maps:get(<<"content">>, ToolResult),
+            ?assertEqual(<<"The answer is 4">>, maps:get(<<"text">>, Content))
+    after 10000 ->
+        exit(CallerId, kill),
+        ct:fail(sampling_round_trip_timeout)
+    end,
+
+    gun:close(SseConn).
+
+fanout_post_without_sse_stream(Config) ->
+    Port = proplists:get_value(port, Config),
+    SessionId = initialize_session(Port),
+
+    %% POST a sampling tool call WITHOUT an open GET SSE stream.
+    %% The push relay has no target, so the sampling/createMessage
+    %% request from the session is dropped. The tool handler's
+    %% request_peer call times out cleanly.
+    Parent = self(),
+    spawn_link(fun() ->
+        CallReq = erlmcp_json_rpc:encode_request(10, <<"tools/call">>, #{
+            <<"name">> => <<"ask_peer">>,
+            <<"arguments">> => #{}
+        }),
+        Result = post_json_long(Port, SessionId, CallReq),
+        Parent ! {fanout_result, Result}
+    end),
+
+    receive
+        {fanout_result, {200, _, Body}} ->
+            {ok, Decoded} = erlmcp_codec:decode(Body),
+            case maps:find(<<"error">>, Decoded) of
+                {ok, ErrObj} ->
+                    ?assertMatch(#{<<"message">> := _}, ErrObj);
+                error ->
+                    ct:fail({expected_error_response, Decoded})
+            end
+    after 35000 ->
+        ct:fail(fanout_timeout)
+    end.
+
+session_survives_dropped_sse(Config) ->
+    Port = proplists:get_value(port, Config),
+    SessionId = initialize_session(Port),
+
+    {ok, SseConn} = gun:open("127.0.0.1", Port),
+    {ok, _} = gun:await_up(SseConn),
+    SseRef = gun:get(SseConn, "/mcp", [
+        {<<"accept">>, <<"text/event-stream">>},
+        {<<"mcp-session-id">>, SessionId}
+    ]),
+    {response, nofin, 200, _} = gun:await(SseConn, SseRef, 5000),
+
     gun:close(SseConn),
     timer:sleep(100),
 
-    %% Session is still alive — POST still works
     PingReq = erlmcp_json_rpc:encode_request(2, <<"ping">>, #{}),
     {200, _, PingBody} = post_json(Port, SessionId, PingReq),
     PingResult = decode_result(PingBody),
@@ -132,14 +244,11 @@ idle_gc_terminates_session(Config) ->
     Port = proplists:get_value(port, Config),
     SessionId = initialize_session(Port),
 
-    %% Session is alive
     PingReq = erlmcp_json_rpc:encode_request(2, <<"ping">>, #{}),
     {200, _, _} = post_json(Port, SessionId, PingReq),
 
-    %% Wait for idle timeout (500ms) + GC interval
     timer:sleep(1000),
 
-    %% Session should be gone
     PingReq2 = erlmcp_json_rpc:encode_request(3, <<"ping">>, #{}),
     {404, _, _} = post_json(Port, SessionId, PingReq2).
 
@@ -149,7 +258,6 @@ get_sse_session_death(Config) ->
     SessionId = initialize_session(Port),
     {ok, SessionPid} = erlmcp_http_session_mgr:lookup(Mgr, SessionId),
 
-    %% Open GET SSE stream
     {ok, SseConn} = gun:open("127.0.0.1", Port),
     {ok, _} = gun:await_up(SseConn),
     SseRef = gun:get(SseConn, "/mcp", [
@@ -159,7 +267,6 @@ get_sse_session_death(Config) ->
     {response, nofin, 200, _} = gun:await(SseConn, SseRef, 5000),
     timer:sleep(50),
 
-    %% Kill the session — the SSE handler should detect the DOWN and close
     exit(SessionPid, kill),
     timer:sleep(200),
     gun:close(SseConn).
@@ -179,7 +286,6 @@ get_sse_with_last_event_id(Config) ->
     Port = proplists:get_value(port, Config),
     SessionId = initialize_session(Port),
 
-    %% Open SSE stream with Last-Event-ID (no events buffered yet, so replay is empty)
     {ok, SseConn} = gun:open("127.0.0.1", Port),
     {ok, _} = gun:await_up(SseConn),
     SseRef = gun:get(SseConn, "/mcp", [
@@ -189,7 +295,6 @@ get_sse_with_last_event_id(Config) ->
     ]),
     {response, nofin, 200, _} = gun:await(SseConn, SseRef, 5000),
 
-    %% Trigger an event via a tool call with progress
     CallReq = erlmcp_json_rpc:encode_request(2, <<"tools/call">>, #{
         <<"name">> => <<"slow_compute">>,
         <<"arguments">> => #{<<"steps">> => 1},
@@ -197,7 +302,6 @@ get_sse_with_last_event_id(Config) ->
     }),
     {200, _, _} = post_json(Port, SessionId, CallReq),
 
-    %% Collect events on the SSE stream
     Events = collect_sse_events(SseConn, SseRef, 1000),
     ?assert(length(Events) >= 1),
     gun:close(SseConn).
@@ -232,6 +336,12 @@ initialize_session(Port) ->
     SessionId.
 
 post_json(Port, SessionId, Body) ->
+    do_post_json(Port, SessionId, Body, 5000).
+
+post_json_long(Port, SessionId, Body) ->
+    do_post_json(Port, SessionId, Body, 35000).
+
+do_post_json(Port, SessionId, Body, Timeout) ->
     {ok, ConnPid} = gun:open("127.0.0.1", Port),
     {ok, _} = gun:await_up(ConnPid),
     Headers0 = [{<<"content-type">>, <<"application/json">>}],
@@ -240,12 +350,12 @@ post_json(Port, SessionId, Body) ->
         _ -> [{<<"mcp-session-id">>, SessionId} | Headers0]
     end,
     StreamRef = gun:post(ConnPid, "/mcp", Headers, Body),
-    case gun:await(ConnPid, StreamRef, 5000) of
+    case gun:await(ConnPid, StreamRef, Timeout) of
         {response, fin, Status, RespHeaders} ->
             gun:close(ConnPid),
             {Status, RespHeaders, <<>>};
         {response, nofin, Status, RespHeaders} ->
-            {ok, RespBody} = gun:await_body(ConnPid, StreamRef, 5000),
+            {ok, RespBody} = gun:await_body(ConnPid, StreamRef, Timeout),
             gun:close(ConnPid),
             {Status, RespHeaders, RespBody}
     end.
@@ -265,6 +375,31 @@ collect_sse_events(ConnPid, StreamRef, Timeout, Acc) ->
             lists:reverse([Data | Acc]);
         _ ->
             lists:reverse(Acc)
+    end.
+
+receive_sse_json(ConnPid, StreamRef, Timeout) ->
+    Events = collect_sse_events(ConnPid, StreamRef, Timeout),
+    parse_first_sse_json(Events).
+
+parse_first_sse_json([]) ->
+    ct:fail(no_sse_events_received);
+parse_first_sse_json([Event | Rest]) ->
+    case parse_sse_data(Event) of
+        {ok, Json} -> Json;
+        skip -> parse_first_sse_json(Rest)
+    end.
+
+parse_sse_data(EventBin) ->
+    Lines = binary:split(EventBin, <<"\n">>, [global]),
+    DataLines = [D || <<"data: ", D/binary>> <- Lines],
+    case DataLines of
+        [] -> skip;
+        _ ->
+            Combined = iolist_to_binary(lists:join(<<"\n">>, DataLines)),
+            case erlmcp_codec:decode(Combined) of
+                {ok, Map} -> {ok, Map};
+                _ -> skip
+            end
     end.
 
 make_echo_tool() ->

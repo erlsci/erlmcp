@@ -2,27 +2,38 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-is_notification_test_() ->
-    [{"request is not notification",
+classify_message_test_() ->
+    [{"request has id and method",
       fun() ->
           Req = erlmcp_json_rpc:encode_request(1, <<"ping">>, #{}),
-          ?assertNot(is_notification(Req))
+          ?assertEqual(request, classify(Req))
       end},
-     {"notification is notification",
+     {"notification has no id",
       fun() ->
           Notif = erlmcp_json_rpc:encode_notification(
               <<"notifications/initialized">>, #{}),
-          ?assert(is_notification(Notif))
+          ?assertEqual(fire_and_forget, classify(Notif))
       end},
-     {"garbage is not notification",
+     {"response has id but no method",
       fun() ->
-          ?assertNot(is_notification(<<"not json">>))
+          Resp = erlmcp_json_rpc:encode_response(1, #{<<"content">> => <<"x">>}),
+          ?assertEqual(fire_and_forget, classify(Resp))
+      end},
+     {"garbage treated as request",
+      fun() ->
+          ?assertEqual(request, classify(<<"not json">>))
       end}].
 
-is_notification(Body) ->
+classify(Body) ->
     case erlmcp_codec:decode(Body) of
         {ok, Map} when is_map(Map) ->
-            not maps:is_key(<<"id">>, Map);
+            HasId = maps:is_key(<<"id">>, Map),
+            HasMethod = maps:is_key(<<"method">>, Map),
+            case {HasId, HasMethod} of
+                {false, _} -> fire_and_forget;
+                {true, false} -> fire_and_forget;
+                {true, true} -> request
+            end;
         _ ->
-            false
+            request
     end.

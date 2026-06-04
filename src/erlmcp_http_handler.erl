@@ -91,13 +91,13 @@ handle_post_body(Body, SessionId, Req, St) ->
     end.
 
 dispatch_to_session(Body, SessionId, SessionPid, Req, St) ->
-    case is_notification(Body) of
-        true ->
+    case classify_message(Body) of
+        fire_and_forget ->
             erlmcp_server_session:send_message(SessionPid, Body),
             Headers = add_session_header(#{}, St#state{session_id = SessionId}),
             Req1 = cowboy_req:reply(202, Headers, <<>>, Req),
             {ok, Req1, St#state{session_id = SessionId}};
-        false ->
+        request ->
             ReqRef = make_ref(),
             Responder = erlmcp_reply:new_http(self(), ReqRef),
             monitor(process, SessionPid),
@@ -192,12 +192,18 @@ is_json_content_type(CT) ->
         _ -> true
     end.
 
-is_notification(Body) ->
+classify_message(Body) ->
     case erlmcp_codec:decode(Body) of
         {ok, Map} when is_map(Map) ->
-            not maps:is_key(<<"id">>, Map);
+            HasId = maps:is_key(<<"id">>, Map),
+            HasMethod = maps:is_key(<<"method">>, Map),
+            case {HasId, HasMethod} of
+                {false, _} -> fire_and_forget;
+                {true, false} -> fire_and_forget;
+                {true, true} -> request
+            end;
         _ ->
-            false
+            request
     end.
 
 add_session_header(Headers, #state{session_id = undefined}) ->
