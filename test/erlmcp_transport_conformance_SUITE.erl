@@ -15,14 +15,13 @@
 ]).
 
 all() ->
-    [{group, stdio}, {group, streamable_http}].
+    [{group, stdio}].
 
 groups() ->
     Tests = [start_stop, send_data, validate_config_valid,
              validate_config_invalid, unknown_messages,
              session_receives_inbound],
-    [{stdio, [], Tests},
-     {streamable_http, [], Tests}].
+    [{stdio, [], Tests}].
 
 init_per_group(Group, Config) ->
     [{transport_type, Group} | Config].

@@ -23,7 +23,7 @@
 %% Logging (M2b)
 -export([log_message/4]).
 %% Convenience setup (M4)
--export([start_stdio_setup/2, start_tcp_setup/3, start_http_setup/3]).
+-export([start_stdio_setup/2, start_tcp_setup/3]).
 
 %% Types
 -type server_id() :: atom().
@@ -325,17 +325,6 @@ start_tcp_setup(ServerId, ServerConfig, TcpConfig) when is_atom(ServerId) ->
     {ok, #{server => Server, session => Session,
            transport => Transport, transport_id => TransId}}.
 
--spec start_http_setup(atom(), map(), map()) ->
-    {ok, #{server := erlmcp_server:server(), session := pid(), transport := pid(), transport_id := atom()}}.
-start_http_setup(ServerId, ServerConfig, HttpConfig) when is_atom(ServerId) ->
-    {ok, Server} = start_server(ServerId, ServerConfig),
-    {ok, Session} = erlmcp_server_session:start_link(
-        #{server => Server, name => atom_to_binary(ServerId, utf8)}),
-    TransId = make_transport_id(ServerId, <<"_http">>),
-    {ok, Transport} = erlmcp_transport_streamable_http:start_link(
-        HttpConfig#{session => Session}),
-    {ok, #{server => Server, session => Session,
-           transport => Transport, transport_id => TransId}}.
 
 %% ServerId is a developer-supplied atom; the suffix is a fixed binary.
 %% The resulting atom count is bounded by the number of servers started.

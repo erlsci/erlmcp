@@ -13,7 +13,9 @@
       ssl,
       inets,
       jsx,
-      jesse
+      jesse,
+      ranch,
+      cowboy
   ]},
   {mod, {erlmcp_app, []}},
   {env, [
