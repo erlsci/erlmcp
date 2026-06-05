@@ -162,3 +162,11 @@ number_opts_test() ->
     Schema = erlmcp_schema:number([{min, 0}]),
     ?assertMatch(#{<<"minimum">> := 0}, Schema).
 
+find_existing_no_candidates_test() ->
+    ?assertEqual({error, schema_file_not_found},
+                 erlmcp_schema:find_existing(["/no/such/path"])).
+
+find_existing_empty_list_test() ->
+    ?assertEqual({error, schema_file_not_found},
+                 erlmcp_schema:find_existing([])).
+

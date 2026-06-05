@@ -17,7 +17,8 @@
     validate/2,
     load_protocol_schema/0,
     protocol_definition/1,
-    validate_protocol/2
+    validate_protocol/2,
+    find_existing/1
 ]).
 
 -type schema() :: map().

@@ -37,7 +37,7 @@ envelope_wrong_jsonrpc_version(_Config) ->
 
 valid_envelope_bad_params(_Config) ->
     Msg = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{}),
-    {error, {invalid_params, {missing, <<"protocolVersion">>}}} =
+    {error, {invalid_params, <<"InitializeParams">>}} =
         erlmcp_json_rpc:decode_and_classify(Msg).
 
 error_response_is_schema_valid(_Config) ->
@@ -60,16 +60,8 @@ error_response_is_schema_valid(_Config) ->
     ?assert(ErrCode1 =:= -32700 orelse ErrCode1 =:= -32600),
     ok = erlmcp_codec:validate_outbound(DecodedEnvelope),
 
-    %% Initialize to reach operational state so we can test param validation
-    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
-        <<"protocolVersion">> => <<"2025-11-25">>,
-        <<"capabilities">> => #{},
-        <<"clientInfo">> => #{<<"name">> => <<"test">>, <<"version">> => <<"1">>}
-    }),
-    erlmcp_server_session:send_message(Session, InitReq),
-    _InitResp = receive_json(),
-
-    %% Now in operational state: bad params → -32602
+    %% Bad initialize params (missing protocolVersion/capabilities/clientInfo)
+    %% → -32602 via schema-driven validation
     BadParams = erlmcp_json_rpc:encode_request(2, <<"initialize">>, #{}),
     erlmcp_server_session:send_message(Session, BadParams),
     ErrorJson32602 = receive_json(),
@@ -89,7 +81,7 @@ valid_request_passes(_Config) ->
 tools_call_missing_name(_Config) ->
     Msg = erlmcp_json_rpc:encode_request(1, <<"tools/call">>,
               #{<<"arguments">> => #{}}),
-    {error, {invalid_params, {missing, <<"name">>}}} =
+    {error, {invalid_params, <<"CallToolParams">>}} =
         erlmcp_json_rpc:decode_and_classify(Msg).
 
 %%====================================================================

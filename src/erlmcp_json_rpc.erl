@@ -307,26 +307,26 @@ classify_msg(#json_rpc_notification{method = Method, params = Params}) ->
     {notification, Method, Params}.
 
 %%====================================================================
-%% Inbound schema validation
+%% Inbound schema validation (jesse-driven, via erlmcp_schema:validate/2)
 %%====================================================================
 
 validate_inbound_request(_Json, Method, Params) ->
-    validate_method_params(Method, Params).
-
-validate_method_params(Method, Params) when is_map(Params) ->
-    case required_param(Method) of
+    case params_schema_name(Method) of
         undefined -> ok;
-        Key ->
-            case maps:is_key(Key, Params) of
-                true -> ok;
-                false -> {error, {invalid_params, {missing, Key}}}
+        DefName ->
+            case Params of
+                P when is_map(P) ->
+                    case erlmcp_schema:validate_protocol(DefName, P) of
+                        ok -> ok;
+                        {error, _} -> {error, {invalid_params, DefName}}
+                    end;
+                _ ->
+                    ok
             end
-    end;
-validate_method_params(_Method, _Params) ->
-    ok.
+    end.
 
-required_param(<<"initialize">>) -> <<"protocolVersion">>;
-required_param(<<"tools/call">>) -> <<"name">>;
-required_param(<<"resources/read">>) -> <<"uri">>;
-required_param(<<"prompts/get">>) -> <<"name">>;
-required_param(_) -> undefined.
+params_schema_name(<<"initialize">>) -> <<"InitializeParams">>;
+params_schema_name(<<"tools/call">>) -> <<"CallToolParams">>;
+params_schema_name(<<"resources/read">>) -> <<"ReadResourceParams">>;
+params_schema_name(<<"prompts/get">>) -> <<"GetPromptParams">>;
+params_schema_name(_) -> undefined.

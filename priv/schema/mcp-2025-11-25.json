@@ -63,6 +63,56 @@
       "required": ["jsonrpc", "error"]
     },
 
+    "InitializeParams": {
+      "type": "object",
+      "description": "Params for initialize request. protocolVersion required per schema.ts L257-264. capabilities and clientInfo are spec-required but treated as optional here for compatibility with existing clients.",
+      "properties": {
+        "protocolVersion": {"type": "string"},
+        "capabilities": {"type": "object"},
+        "clientInfo": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "version": {"type": "string"}
+          }
+        },
+        "_meta": {"type": "object"}
+      },
+      "required": ["protocolVersion"]
+    },
+
+    "CallToolParams": {
+      "type": "object",
+      "description": "Params for tools/call request. name required per schema.ts L1139-1148.",
+      "properties": {
+        "name": {"type": "string"},
+        "arguments": {"type": "object"},
+        "_meta": {"type": "object"}
+      },
+      "required": ["name"]
+    },
+
+    "ReadResourceParams": {
+      "type": "object",
+      "description": "Params for resources/read request. uri required per schema.ts L693-700.",
+      "properties": {
+        "uri": {"type": "string"},
+        "_meta": {"type": "object"}
+      },
+      "required": ["uri"]
+    },
+
+    "GetPromptParams": {
+      "type": "object",
+      "description": "Params for prompts/get request. name required per schema.ts L947-956.",
+      "properties": {
+        "name": {"type": "string"},
+        "arguments": {"type": "object"},
+        "_meta": {"type": "object"}
+      },
+      "required": ["name"]
+    },
+
     "Icon": {
       "type": "object",
       "description": "SHOULD->MUST overlay: src required, additionalProperties:false. Guards against handoff §1.3 (buggy emoji-icon shape with extra fields caused Claude Desktop to silently reject tools).",
