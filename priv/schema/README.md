@@ -33,8 +33,14 @@ with two intentional tightenings documented inline as the SHOULD⇒MUST overlay:
    the original `taskSupport => allowed` bug (handoff §1.5) where an invalid
    enum value was accepted without error.
 
+## Drift guard
+
+`make schema-check` verifies that the protocol version string in `schema.ts`
+(`LATEST_PROTOCOL_VERSION`) matches the version in the JSON Schema title. If
+`schema.ts` is bumped to a new protocol version without updating the JSON
+Schema, `make schema-check` fails.
+
 ## Updating
 
 When `schema.ts` changes (new protocol version), update `mcp-2025-11-25.json`
-by hand to match. The CI drift-guard (`make schema-check`) verifies that the
-checked-in schema is loadable by jesse and covers the expected definitions.
+by hand to match, then run `make schema-check` to confirm the versions align.

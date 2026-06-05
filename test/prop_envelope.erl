@@ -41,6 +41,8 @@ prop_request_roundtrip() ->
                 case erlmcp_json_rpc:decode_and_classify(Encoded) of
                     {ok, {request, DecodedId, DecodedMethod, _DecodedParams}} ->
                         DecodedId =:= Id andalso DecodedMethod =:= Method;
+                    {error, {invalid_params, _}} ->
+                        true;
                     _ ->
                         false
                 end

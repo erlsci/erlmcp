@@ -187,8 +187,9 @@ handle_uninitialized_data(RawData, Data, Responder) ->
     case erlmcp_json_rpc:decode_and_classify(RawData) of
         {ok, Classified} ->
             handle_uninitialized_message(Classified, Data, Responder);
-        {error, _Reason} ->
-            send_error(Responder, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
+        {error, Reason} ->
+            {Code, Msg} = classify_decode_error(Reason),
+            send_error(Responder, null, Code, Msg),
             keep_state_and_data
     end.
 
@@ -202,8 +203,9 @@ handle_operational_data(RawData, Data, Responder) ->
             ?LOG_DEBUG("session(operational): classified ~p", [Classified]),
             handle_operational_message(Classified, Data, Responder);
         {error, Reason} ->
-            ?LOG_DEBUG("session(operational): parse error ~p", [Reason]),
-            send_error(Responder, null, erlmcp_json_rpc:parse_error(), <<"Parse error">>),
+            ?LOG_DEBUG("session(operational): decode error ~p", [Reason]),
+            {Code, Msg} = classify_decode_error(Reason),
+            send_error(Responder, null, Code, Msg),
             keep_state_and_data
     end.
 
@@ -1012,6 +1014,13 @@ dispatch_request(Method, Params, Handlers, Ctx) ->
 %%====================================================================
 %% Wire helpers
 %%====================================================================
+
+classify_decode_error({invalid_params, _}) ->
+    {erlmcp_json_rpc:invalid_params(), <<"Invalid params">>};
+classify_decode_error({invalid_request, _}) ->
+    {erlmcp_json_rpc:invalid_request(), <<"Invalid request">>};
+classify_decode_error(_) ->
+    {erlmcp_json_rpc:parse_error(), <<"Parse error">>}.
 
 send_response(undefined, _Id, _Result) ->
     ok;

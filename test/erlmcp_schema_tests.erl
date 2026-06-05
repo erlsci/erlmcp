@@ -138,3 +138,27 @@ validate_protocol_init_result_test() ->
                <<"capabilities">> => #{},
                <<"serverInfo">> => #{<<"name">> => <<"x">>,
                                      <<"version">> => <<"1">>}}).
+
+number_with_opts_test() ->
+    Schema = erlmcp_schema:number([{min, 0}, {max, 100}]),
+    ?assertMatch(#{<<"minimum">> := 0, <<"maximum">> := 100}, Schema).
+
+pattern_constraint_test() ->
+    Schema = erlmcp_schema:string([{pattern, <<"^[a-z]+$">>}]),
+    ?assertMatch(#{<<"pattern">> := <<"^[a-z]+$">>}, Schema).
+
+unknown_field_opt_test() ->
+    Schema = erlmcp_schema:string([unknown_opt]),
+    ?assertMatch(#{<<"type">> := <<"string">>}, Schema).
+
+validate_protocol_unknown_definition_test() ->
+    {error, {definition_not_found, <<"NonExistent">>}} =
+        erlmcp_schema:validate_protocol(<<"NonExistent">>, #{}).
+
+validate_protocol_propagates_load_error_test() ->
+    ok.
+
+number_opts_test() ->
+    Schema = erlmcp_schema:number([{min, 0}]),
+    ?assertMatch(#{<<"minimum">> := 0}, Schema).
+

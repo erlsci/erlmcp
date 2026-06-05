@@ -95,3 +95,13 @@ validate_outbound_non_map_test() ->
 
 validate_outbound_unknown_shape_test() ->
     ?assertEqual(ok, erlmcp_codec:validate_outbound(#{<<"foo">> => <<"bar">>})).
+
+validate_outbound_non_map_result_test() ->
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
+            <<"result">> => <<"not a map">>},
+    ?assertEqual(ok, erlmcp_codec:validate_outbound(Msg)).
+
+validate_outbound_non_map_error_test() ->
+    Msg = #{<<"jsonrpc">> => <<"2.0">>, <<"id">> => 1,
+            <<"error">> => <<"not a map">>},
+    ?assertEqual(ok, erlmcp_codec:validate_outbound(Msg)).

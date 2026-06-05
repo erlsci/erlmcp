@@ -85,6 +85,18 @@ test-server:
 test-advanced-client:
 	@$(REBAR) shell --eval "simple_client:run_advanced()."
 
+# Schema drift-guard: verify the protocol version in the hand-curated JSON
+# Schema matches the version declared in schema.ts. Catches the case where
+# schema.ts is bumped to a new protocol version without updating the JSON Schema.
+schema-check:
+	@TS_VER=$$(grep 'LATEST_PROTOCOL_VERSION' docs/0.6.0/planning/schema.ts | grep -oE '"[0-9]{4}-[0-9]{2}-[0-9]{2}"' | tr -d '"'); \
+	JSON_VER=$$(grep '"title"' priv/schema/mcp-2025-11-25.json | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}'); \
+	if [ "$$TS_VER" != "$$JSON_VER" ]; then \
+		echo "SCHEMA DRIFT: schema.ts declares $$TS_VER but JSON Schema declares $$JSON_VER"; \
+		exit 1; \
+	fi; \
+	echo "Schema version match: $$TS_VER"
+
 # Coverage report
 coverage-report:
 	@$(REBAR) cover

@@ -92,7 +92,10 @@ decode_message(Json) when is_binary(Json) ->
 decode_and_classify(Json) when is_binary(Json) ->
     case decode_message(Json) of
         {ok, #json_rpc_request{id = Id, method = Method, params = Params}} ->
-            {ok, {request, Id, Method, Params}};
+            case validate_inbound_request(Json, Method, Params) of
+                ok -> {ok, {request, Id, Method, Params}};
+                {error, _} = Err -> Err
+            end;
         {ok, #json_rpc_response{id = Id, result = Result, error = undefined}} ->
             {ok, {response, Id, Result}};
         {ok, #json_rpc_response{id = Id, error = Error}} ->
@@ -302,3 +305,28 @@ classify_msg(#json_rpc_response{id = Id, error = Error}) ->
     {error_response, Id, Error};
 classify_msg(#json_rpc_notification{method = Method, params = Params}) ->
     {notification, Method, Params}.
+
+%%====================================================================
+%% Inbound schema validation
+%%====================================================================
+
+validate_inbound_request(_Json, Method, Params) ->
+    validate_method_params(Method, Params).
+
+validate_method_params(Method, Params) when is_map(Params) ->
+    case required_param(Method) of
+        undefined -> ok;
+        Key ->
+            case maps:is_key(Key, Params) of
+                true -> ok;
+                false -> {error, {invalid_params, {missing, Key}}}
+            end
+    end;
+validate_method_params(_Method, _Params) ->
+    ok.
+
+required_param(<<"initialize">>) -> <<"protocolVersion">>;
+required_param(<<"tools/call">>) -> <<"name">>;
+required_param(<<"resources/read">>) -> <<"uri">>;
+required_param(<<"prompts/get">>) -> <<"name">>;
+required_param(_) -> undefined.

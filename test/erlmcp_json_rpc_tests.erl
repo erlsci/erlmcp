@@ -192,3 +192,21 @@ error_codes_named_test() ->
     ?assertEqual(-32601, erlmcp_json_rpc:method_not_found()),
     ?assertEqual(-32602, erlmcp_json_rpc:invalid_params()),
     ?assertEqual(-32603, erlmcp_json_rpc:internal_error()).
+
+create_error_test() ->
+    Err = erlmcp_json_rpc:create_error(-32600, <<"bad">>, #{<<"detail">> => <<"x">>}),
+    ?assert(is_tuple(Err)).
+
+decode_any_invalid_json_test() ->
+    ?assertMatch({error, _}, erlmcp_json_rpc:decode_and_classify_any(<<"not json">>)).
+
+decode_any_bare_string_test() ->
+    {ok, Json} = erlmcp_codec:encode(<<"just a string">>),
+    ?assertMatch({error, {invalid_json, not_object}},
+                 erlmcp_json_rpc:decode_and_classify_any(Json)).
+
+decode_any_bad_jsonrpc_version_test() ->
+    {ok, Json} = erlmcp_codec:encode(#{<<"jsonrpc">> => <<"1.0">>,
+                                       <<"id">> => 1,
+                                       <<"method">> => <<"x">>}),
+    ?assertMatch({error, _}, erlmcp_json_rpc:decode_and_classify_any(Json)).
