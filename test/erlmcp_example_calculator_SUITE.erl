@@ -17,6 +17,7 @@
     discoverability_meta/1,
     directory_tool/1,
     instructions_generated/1,
+    instructions_readable/1,
     convert_tool/1
 ]).
 
@@ -32,6 +33,7 @@ all() ->
      discoverability_meta,
      directory_tool,
      instructions_generated,
+     instructions_readable,
      convert_tool].
 
 init_per_suite(Config) ->
@@ -222,6 +224,30 @@ instructions_generated(Config) ->
     ?assert(is_binary(Instructions)),
     ?assert(binary:match(Instructions, <<"arithmetic">>) =/= nomatch),
     ?assert(binary:match(Instructions, <<"conversion">>) =/= nomatch).
+
+instructions_readable(_Config) ->
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"calculator">>,
+        version => <<"0.6.0">>,
+        purpose => <<"An arithmetic MCP server demonstrating handler behaviours, structured output, task support with progress/cancel, and server-initiated sampling.">>,
+        source => <<"https://github.com/erlsci/erlmcp/tree/main/examples/calculator">>,
+        handler => example_calculator_handler,
+        tools => [erlmcp:make_directory_tool(),
+                  calculator_server:slow_tool_spec(),
+                  calculator_server:explain_tool_spec()]
+    }),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"calculator">>, version => <<"0.6.0">>
+    }),
+    initialize(Session),
+    Instructions = erlmcp_server_session:get_instructions(Session),
+    ?assert(is_binary(Instructions)),
+    ?assert(binary:match(Instructions, <<"calculator">>) =/= nomatch),
+    ?assert(binary:match(Instructions, <<"directory">>) =/= nomatch),
+    gen_statem:stop(Session),
+    gen_server:stop(Srv).
 
 convert_tool(Config) ->
     Server = ?config(server, Config),

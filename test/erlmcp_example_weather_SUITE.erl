@@ -19,7 +19,8 @@
     completion_prompt_arg/1,
     completion_template_param/1,
     capability_map_resources_prompts/1,
-    pagination_resources/1
+    pagination_resources/1,
+    instructions_readable/1
 ]).
 
 all() ->
@@ -37,7 +38,8 @@ all() ->
      completion_prompt_arg,
      completion_template_param,
      capability_map_resources_prompts,
-     pagination_resources].
+     pagination_resources,
+     instructions_readable].
 
 init_per_testcase(_TC, Config) ->
     {ok, Srv} = erlmcp_server:start_link(#{
@@ -313,3 +315,28 @@ pagination_resources(Config) ->
     Result = maps:get(<<"result">>, Resp),
     ?assert(is_list(maps:get(<<"resources">>, Result))),
     ?assertNot(maps:is_key(<<"nextCursor">>, Result)).
+
+instructions_readable(_Config) ->
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"weather">>,
+        version => <<"0.6.0">>,
+        purpose => <<"A weather MCP server demonstrating resources, resource templates with completion, prompts with arguments, and full discoverability.">>
+    }),
+    weather_server:register_all(Srv),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"weather">>, version => <<"0.6.0">>
+    }),
+    InitReq = erlmcp_json_rpc:encode_request(1, <<"initialize">>, #{
+        <<"protocolVersion">> => <<"2025-11-25">>,
+        <<"capabilities">> => #{}
+    }),
+    erlmcp_server_session:send_message(Session, InitReq),
+    receive {send, _} -> ok after 5000 -> error(timeout) end,
+    Instructions = erlmcp_server_session:get_instructions(Session),
+    ?assert(is_binary(Instructions)),
+    ?assert(binary:match(Instructions, <<"weather">>) =/= nomatch),
+    ?assert(binary:match(Instructions, <<"directory">>) =/= nomatch),
+    gen_statem:stop(Session),
+    gen_server:stop(Srv).

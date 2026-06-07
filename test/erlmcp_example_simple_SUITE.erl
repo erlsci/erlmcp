@@ -4,10 +4,12 @@
 -include_lib("stdlib/include/assert.hrl").
 
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
--export([start_stop/1, echo_tool/1, add_tool/1, read_resource/1, get_prompt/1]).
+-export([start_stop/1, echo_tool/1, add_tool/1, read_resource/1, get_prompt/1,
+         instructions_readable/1]).
 
 all() ->
-    [start_stop, echo_tool, add_tool, read_resource, get_prompt].
+    [start_stop, echo_tool, add_tool, read_resource, get_prompt,
+     instructions_readable].
 
 init_per_testcase(_TC, Config) ->
     {ok, Srv} = erlmcp_server:start_link(#{
@@ -77,6 +79,26 @@ get_prompt(Config) ->
     Result = maps:get(<<"result">>, Resp),
     [Msg] = maps:get(<<"messages">>, Result),
     ?assertEqual(<<"user">>, maps:get(<<"role">>, Msg)).
+
+instructions_readable(_Config) ->
+    {ok, Srv} = erlmcp_server:start_link(#{
+        name => <<"simple">>,
+        version => <<"0.6.0">>,
+        purpose => <<"A minimal MCP server demonstrating config-driven tool, resource, and prompt registration with inline handlers.">>
+    }),
+    simple_server:register_all(Srv),
+    Responder = erlmcp_reply:new_device(self()),
+    {ok, Session} = erlmcp_server_session:start_link(#{
+        server => Srv, responder => Responder,
+        name => <<"simple">>, version => <<"0.6.0">>
+    }),
+    initialize(Session),
+    Instructions = erlmcp_server_session:get_instructions(Session),
+    ?assert(is_binary(Instructions)),
+    ?assert(binary:match(Instructions, <<"simple">>) =/= nomatch),
+    ?assert(binary:match(Instructions, <<"directory">>) =/= nomatch),
+    gen_statem:stop(Session),
+    gen_server:stop(Srv).
 
 %%====================================================================
 %% Helpers

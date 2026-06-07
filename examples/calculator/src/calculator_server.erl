@@ -21,6 +21,10 @@ start() ->
 -spec start(map()) -> {ok, pid()} | {error, term()}.
 start(Config) ->
     erlmcp:start_stdio_setup(calculator, Config#{
+        name => <<"calculator">>,
+        version => <<"0.6.0">>,
+        purpose => <<"An arithmetic MCP server demonstrating handler behaviours, structured output, task support with progress/cancel, and server-initiated sampling.">>,
+        source => <<"https://github.com/erlsci/erlmcp/tree/main/examples/calculator">>,
         handler => ?MODULE,
         tools => [erlmcp:make_directory_tool(), slow_tool_spec(), explain_tool_spec()]
     }).
@@ -107,6 +111,7 @@ slow_tool_spec() ->
       next => [<<"add">>],
       icons => emoji_icon(<<"⏳"/utf8>>),
       task_support => optional,
+      protocol_features => [tasks, progress],
       handler => fun slow_compute/2}.
 
 explain_tool_spec() ->
@@ -122,6 +127,7 @@ explain_tool_spec() ->
       summary => <<"Demonstrates server-initiated sampling via request_peer">>,
       next => [<<"add">>],
       icons => emoji_icon(<<"💡"/utf8>>),
+      protocol_features => [sampling],
       handler => fun explain_via_sampling/2}.
 
 slow_compute(#{<<"steps">> := Steps}, Ctx) ->

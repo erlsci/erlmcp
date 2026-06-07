@@ -15,6 +15,10 @@ start() ->
 -spec start(map()) -> {ok, pid()} | {error, term()}.
 start(Config) ->
     erlmcp:start_stdio_setup(simple, Config#{
+        name => <<"simple">>,
+        version => <<"0.6.0">>,
+        purpose => <<"A minimal MCP server demonstrating config-driven tool, resource, and prompt registration with inline handlers.">>,
+        source => <<"https://github.com/erlsci/erlmcp/tree/main/examples/simple">>,
         tools => tools(),
         resources => resources(),
         prompts => prompts()

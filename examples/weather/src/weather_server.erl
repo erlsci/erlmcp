@@ -20,6 +20,10 @@ start_stdio() ->
 -spec start_stdio(map()) -> {ok, pid()} | {error, term()}.
 start_stdio(Config) ->
     erlmcp:start_stdio_setup(weather, Config#{
+        name => <<"weather">>,
+        version => <<"0.6.0">>,
+        purpose => <<"A weather MCP server demonstrating resources, resource templates with completion, prompts with arguments, and full discoverability.">>,
+        source => <<"https://github.com/erlsci/erlmcp/tree/main/examples/weather">>,
         tools => tools(),
         resources => resources(),
         prompts => prompts()
@@ -117,6 +121,7 @@ weather_resource_template() ->
         name => <<"City Weather">>,
         description => <<"Current weather for any city">>,
         mime_type => <<"application/json">>,
+        protocol_features => [completion],
         handler => fun(#{<<"city">> := City}, _Ctx) ->
             Text = <<"{\"city\":\"", City/binary, "\",\"temp\":20}">>,
             {ok, #{<<"uri">> => <<"weather://current/", City/binary>>,
