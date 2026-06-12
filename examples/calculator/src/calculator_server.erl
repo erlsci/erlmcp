@@ -14,11 +14,11 @@
 -export([start/0, start/1, slow_tool_spec/0, explain_tool_spec/0]).
 -export([tools/0, handle_tool/3]).
 
--spec start() -> {ok, pid()} | {error, term()}.
+-spec start() -> {ok, pid()} | {error, term()} | ignore.
 start() ->
     start(#{}).
 
--spec start(map()) -> {ok, pid()} | {error, term()}.
+-spec start(map()) -> {ok, pid()} | {error, term()} | ignore.
 start(Config) ->
     erlmcp:start_stdio_setup(calculator, Config#{
         name => <<"calculator">>,

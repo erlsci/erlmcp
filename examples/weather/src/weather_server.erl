@@ -13,11 +13,11 @@
 
 -define(CITIES, [<<"london">>, <<"paris">>, <<"tokyo">>, <<"new_york">>]).
 
--spec start_stdio() -> {ok, pid()} | {error, term()}.
+-spec start_stdio() -> {ok, pid()} | {error, term()} | ignore.
 start_stdio() ->
     start_stdio(#{}).
 
--spec start_stdio(map()) -> {ok, pid()} | {error, term()}.
+-spec start_stdio(map()) -> {ok, pid()} | {error, term()} | ignore.
 start_stdio(Config) ->
     erlmcp:start_stdio_setup(weather, Config#{
         name => <<"weather">>,

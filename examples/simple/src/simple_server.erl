@@ -8,11 +8,11 @@
 -export([start/0, start/1, register_all/1]).
 -export([tools/0, resources/0, prompts/0]).
 
--spec start() -> {ok, pid()} | {error, term()}.
+-spec start() -> {ok, pid()} | {error, term()} | ignore.
 start() ->
     start(#{}).
 
--spec start(map()) -> {ok, pid()} | {error, term()}.
+-spec start(map()) -> {ok, pid()} | {error, term()} | ignore.
 start(Config) ->
     erlmcp:start_stdio_setup(simple, Config#{
         name => <<"simple">>,
