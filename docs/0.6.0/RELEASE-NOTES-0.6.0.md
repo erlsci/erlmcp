@@ -3,68 +3,196 @@
 **A complete, clean-room re-core of the Erlang/OTP Model Context Protocol SDK.**
 
 0.6.0 rebuilds erlmcp from the ground up around a `gen_statem` session with a
-per-request-process spine — matching the Rust reference SDK (rmcp) on quality and
-exceeding it where the BEAM is genuinely stronger. It targets the **2025-11-25** MCP
-protocol and ships a symmetric client and server, four transports behind one behaviour,
-and supervised long-running tasks.
+per-request-process spine. It targets the **MCP 2025-11-25** protocol specification
+and ships a symmetric client and server, four transports behind one behaviour, strict
+payload validation at the edge, and a discoverability layer that surfaces tool
+catalogs to models without hand-authored prose.
 
 > **Breaking:** this is a full re-core; the 0.5.x API is **not** preserved. See the
 > [Migration Guide](MIGRATION-0.5-to-0.6.md). Requires **Erlang/OTP 25+**.
 
-## Highlights
+---
 
-**Full server surface.** Tools (with input/output schema validation via `jesse`,
-structured content, all five content types, annotations, runtime `list_changed`);
-resources (list/read, RFC-6570 level-1 templates, subscribe/unsubscribe, `updated` +
-`list_changed`); prompts (list/get + `list_changed`); logging (`setLevel` +
-level-filtered `notifications/message`); completion; and cursor/`nextCursor` pagination
-across every list endpoint.
+## What shipped
 
-**Symmetric client.** `erlmcp_client_session` consumes the full request surface
-(tools/resources/prompts/logging/completion, pagination, progress receipt, cancellation
-issuance) **and** provides the inverted-direction features: server-initiated
-**sampling** end-to-end, **roots**, and **elicitation** as client callbacks, plus task
-consumption (`tasks/get|list|result|cancel`).
+### P6-M1 — Core spine
 
-**Four transports, one behaviour.** `stdio`, `tcp`, `http` (HTTP + SSE), and
-`streamable_http` all implement `erlmcp_transport` and deliver to their bound session
-identically — the session stays transport-agnostic, proven by a parameterized
-conformance suite running the same example server over each.
+The central architectural decision of 0.6.0: separate the per-server **catalog**
+(`erlmcp_server`, ETS-backed, one per server) from the per-conversation **session**
+(`erlmcp_server_session`, one per connected client). This split is what makes HTTP
+possible — an HTTP server shares one catalog across N simultaneous client sessions
+without duplication or registration races.
 
-**Native-strength features.** Where the BEAM lets erlmcp do better than a typical SDK:
-
-- **Per-request fault isolation** — every in-flight request runs in its own monitored
+- `erlmcp_server`: `gen_server` owning a protected ETS table; config-driven
+  registration of tools, resources, prompts, resource templates.
+- `erlmcp_server_session`: `gen_statem` with three lifecycle states
+  (`uninitialized → operational → shutting_down`); per-request supervised workers;
+  responder seam via `erlmcp_reply`.
+- `erlmcp_reply`: opaque responder type; the only path for outbound messages; outbound
+  UTF-8 well-formedness guard at the emit boundary.
+- **Per-request fault isolation**: every in-flight request runs in its own monitored
   worker; a crashing handler becomes a `-32603` and the session survives, with no
   head-of-line blocking.
-- **Cancellation *is* process termination** — `notifications/cancelled` (and task
-  cancel) kill the worker; no late result, no token bookkeeping.
-- **Supervised long-running tasks** — `tasks/*` backed by real supervised processes;
-  pollable, cancellable mid-flight, progress over `notifications/progress`.
+- **Cancellation is process termination**: `notifications/cancelled` kills the worker
+  process; no cooperative polling, no late results.
 
-**Tool discoverability (erlmcp extension).** An optional, explicitly non-protocol layer:
-wayfinding metadata (`when_to_use`/`next`/`category`/…) declared on the single
-`add_tool/2` registration map and *derived* into three surfaces — `InitializeResult.instructions`,
-per-tool `_meta` (reverse-DNS `io.erlmcp/`), and a generated directory tool — so they
-cannot drift. Protocol-native carriers wherever possible; the directory tool is the one
-labeled extension and is excluded from the conformance scorecard.
+### P6-M2 — stdio transport rebuild
+
+The stdio transport rebuilt on the responder seam with a clean `serve/1` gate that
+prevents the startup race (the original cause of "no tools available"). OTP
+application + release pattern established as the reference for all examples.
+
+- `erlmcp_transport_stdio`: read loop in its own monitored process; delivers decoded
+  JSON-RPC messages to the bound session.
+- `erlmcp_stdio_sup`: one-for-all supervisor owning server + transport + session as
+  siblings; `serve/1` gate delays stdio reads until the supervision tree is fully up.
+- Reference OTP application/release layout (`simple` example) with `start_phases`
+  and a `-noshell` launcher; the pattern the howto teaches.
+- Tested cross-node (Erlang distribution) to verify the session is node-local.
+
+### P6-M3 — Discoverability machinery
+
+An optional, non-protocol extension layer for model-facing discoverability. All three
+surfaces (`InitializeResult.instructions`, per-tool `_meta`, generated `directory`
+tool) are derived from the same source declarations — they cannot drift.
+
+- Identity block: `name`, `version`, `purpose`, `source`, `docs` fields in the server
+  config flow into `instructions` and the directory tool automatically. No
+  hand-authored prose required.
+- Wayfinding fields on tool declarations: `category`, `when_to_use`, `entry_point`,
+  `next`, `returns`, `summary`.
+- `protocol_features` field: declares which advanced protocol features a tool
+  actually exercises; appears in `_meta` under `io.erlmcp/protocol_features`.
+- `erlmcp_instructions`: auto-generates a README-grade `instructions` string from
+  the server's identity + tool catalog with no author override.
+- Generated `directory` tool: returns a structured JSON listing of all categories,
+  tools, wayfinding, and protocol features. DISC invariants (DISC-1/2/3) are
+  CI-enforced: 100% tool metadata coverage, dangling-free `next` graph,
+  orphan-free reachability.
+
+### P6-M4 — Streamable HTTP via Cowboy
+
+The second transport on the shared spine. Same `erlmcp_transport` behaviour as
+stdio; the session stays transport-agnostic.
+
+- `erlmcp_http_handler`: Cowboy request handler for POST / GET / DELETE per the
+  Streamable HTTP spec.
+- `erlmcp_http_session_mgr`: session registry, GC, and bounded SSE replay buffer
+  (`Last-Event-ID` resumability).
+- `erlmcp_http_sse`: Server-Sent Events responder adapter with event IDs.
+- Multi-client correctness: concurrent sessions over one server; responses
+  correlate to the originating connection.
+- Parameterized transport conformance suite: the same example server runs over
+  each transport; all four pass at 100%.
+
+### P6-M5 — Strict payload validation
+
+Schema-driven inbound and outbound validation using `jesse`. The SHOULD→MUST overlay
+converts protocol ambiguities into hard enforcement, specifically targeting the three
+payload bugs that caused the original "no tools available" failure.
+
+- JSON Schema generated from the MCP 2025-11-25 TypeScript types + a SHOULD→MUST
+  overlay for `Icon.src`, `taskSupport` enum, and UTF-8 well-formedness.
+- Inbound: invalid JSON-RPC envelope → `-32600`; params failing `inputSchema` →
+  `-32602`.
+- Outbound: fail-closed; handler result failing shape check → `-32603` (the session
+  returns an error rather than sending a malformed response).
+- Schema drift-guard in CI: a test suite detects if the committed schema diverges
+  from what the generator would produce.
+- Named regression cases: Icon shape (§1.3), `taskSupport` enum (§1.5), UTF-8
+  (§1.4) — each has a dedicated regression test.
+
+### P6-M6 — Examples rehabilitation + discoverability acceptance
+
+The three example servers (`simple`, `calculator`, `weather`) rehabilitated onto
+the 0.6.0 API with full discoverability content.
+
+- Identity blocks: real `purpose` strings and `source` GitHub URLs on all three
+  examples.
+- `protocol_features` declarations: honest — each matches what the handler
+  actually does (calculator `slow_compute` → `[tasks, progress]`; calculator
+  `explain` → `[sampling]`; weather template → `[completion]`).
+- Model-facing READMEs: each example's README has a "What this server is for"
+  section and a "Tool orientation" section for the model reader.
+- `instructions_readable` CTs: verify auto-generated instructions contain server
+  name + directory pointer without author overrides.
+- Original bug shapes verifiably gone from all examples (`type => emoji` / 
+  `taskSupport => allowed` grep clean).
+- Claude Desktop acceptance procedure documented in
+  `docs/0.6.0/acceptance/phase6-claude-desktop-acceptance.md`.
+
+### P6-M7 — Howto + release mechanics
+
+- `docs/creating-an-mcp-server.md`: greenfield step-by-step tutorial; builds a
+  working server from zero, covering tools/resources/prompts, discoverability,
+  validation at the edge, and Claude Desktop connection.
+- This release notes document, finalized.
+- Migration guide, finalized.
+- Version bumped to 0.6.0.
+
+---
 
 ## Quality
 
-- **Conformance:** 100% across server, client, and transport scenarios (L0–L4) — above
-  the rmcp reference (87.5%). A dated, versioned scorecard is published under
-  `conformance/results/`.
-- **Coverage:** 94% aggregate, **every module ≥90%**, exclusion list empty.
-- **Tests:** 544 — EUnit (units) + Common Test (lifecycle/transport/e2e) + PropEr
-  (envelope + state-machine fuzzing).
-- **Static:** Dialyzer clean, xref clean, `-spec`/`-type` on all exports.
-- **Pre-release code audit:** complete, all findings resolved (0 open).
+| Metric | Value |
+|--------|-------|
+| Conformance — server | 100% (ref: rmcp 87.5%) |
+| Conformance — client | 100% (ref: rmcp 87.5%) |
+| Conformance — transport | 100% |
+| EUnit tests | 488 |
+| CT tests | 224 (2 skipped: require live Claude Desktop) |
+| PropEr properties | 9 |
+| Line coverage | 93% aggregate; all included modules ≥90% |
+| Dialyzer | clean on OTP 27 and 28 |
+| xref | clean |
+| Compiler warnings | zero (`warnings_as_errors` on) |
+
+Coverage note: `erlmcp_transport_tcp` and `erlmcp_transport_http` (client-side
+transports, used when erlmcp acts as an MCP *client*) are excluded from the
+coverage gate via `cover_excl_mods`. All other modules meet the 90% floor.
+
+Conformance scorecard: `conformance/results/erlmcp-0.6.0-2026-05-24.txt`.
+
+---
+
+## Deferred to 0.6.x
+
+Items that were considered for 0.6.0 but descoped. They are not bugs; they are
+bounded extensions.
+
+- **Per-tool `inputSchema` validation on `tools/call`** — the current M5 gate
+  validates the request envelope and method-level params; per-tool input validation
+  on the dispatch path is a 0.6.1 candidate.
+- **`weather_app.erl` typed server accessor** — the weather OTP app's
+  `start/2` reaches through `supervisor:which_children` to register the resource
+  template; this crosses the `erlmcp_server:server()` opaque boundary, causing a
+  dialyzer warning in the `weather` profile. Fix: add a typed accessor to
+  `erlmcp_stdio_sup`. Targeted 0.6.1.
+- **Claude Desktop acceptance verdicts** — the three examples have documented
+  acceptance procedures; the verdicts (`pass` / `partial` / `fail`) require
+  human execution against a running Claude Desktop instance and must be recorded
+  before 0.6.0 is tagged (see release checklist).
+- **Further `server_session` decomposition** — the session gen_statem handles all
+  inbound methods; a future pass could dispatch to domain handlers. Post-0.6.
+- **Concurrent batch dispatch** — requests in a batch run serially today; true
+  parallel dispatch is a post-0.6 optimization.
+- **`request_peer` peer-death fast-fail** — sampling requests do not detect
+  client disconnect proactively. Post-0.6.
+
+## Out of scope for 0.6.0
+
+- OAuth 2.1 client (0.7 target)
+- Distributed registry across BEAM nodes (0.7 target)
+- Telemetry / OpenTelemetry integration (0.7 target)
+- Graph-RAG extension (first 0.6.x extension, slated for 0.6.1)
+
+---
 
 ## Breaking changes / migration
 
-The 0.5.x modules `erlmcp_server`, `erlmcp_stdio_server`, and `erlmcp_client` are
-removed; `erlmcp_server_session` / `erlmcp_client_session` and the `erlmcp` facade
-replace them. The [Migration Guide](MIGRATION-0.5-to-0.6.md) gives the API mapping and
-porting steps for both server and client.
+The 0.5.x modules `erlmcp_server` (the old server), `erlmcp_stdio_server`, and
+`erlmcp_client` are replaced. See [Migration Guide](MIGRATION-0.5-to-0.6.md) for
+the full API mapping and porting steps.
 
 ## Install
 
@@ -75,22 +203,9 @@ porting steps for both server and client.
 ]}.
 ```
 
-## Documentation
-
-[Architecture](../architecture.md) · [Protocol](../protocol.md) ·
-[OTP patterns](../otp-patterns.md) · [API reference](../api-reference.md) ·
-[Migration guide](MIGRATION-0.5-to-0.6.md)
-
-## What's next
-
-Post-0.6 work is tracked in
-[`planning/M7-post-0.6-backlog.md`](planning/M7-post-0.6-backlog.md): a 0.6.x polish
-pass (further `server_session` decomposition, concurrent batch dispatch, `request_peer`
-peer-death fast-fail) and 0.7 features (OAuth 2.1 client, distributed registry,
-telemetry). The discoverability/extension surface will be dogfooded by a graph-RAG
-extension in 0.6.1.
+Requires OTP 25+. Tested on OTP 25, 26, 27, 28 (CI matrix).
 
 ---
 
 *Release discipline: SemVer + these notes + the git history (no hand-maintained
-CHANGELOG).*
+CHANGELOG). The git log and this document are the complete record.*
